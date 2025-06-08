@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "commonjs",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "outDir": "./dist", // Puoi impostare la tua cartella di output preferita, di solito 'dist' o 'typechain-types'
+
+    // Importante per ethers con Hardhat:
+    // Questo permette a TypeScript di trovare i tipi specifici di Hardhat che estendono ethers
+    "typeRoots": [
+      "./node_modules/@types",
+      "./node_modules/@nomicfoundation/hardhat-ethers/type-extensions.d.ts"
+    ]
+  },
+  "include": [
+    "./scripts", // I tuoi script come createSubV2_5.ts
+    "./test",    // I tuoi test
+    "./type-extensions.d.ts", // File generato da Hardhat con estensioni di tipo
+    "./hardhat.config.ts" // La tua configurazione Hardhat
+  ]
+  // Non è necessario un "files" se "include" è configurato correttamente
+}
