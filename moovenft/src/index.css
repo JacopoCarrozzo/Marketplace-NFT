@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* src/index.css */
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-image: url('./assets//images//background.jpg'); 
+  background-size: cover; /* Copre l'intero schermo */
+  background-position: center; /* Centra l'immagine */
+  background-repeat: no-repeat; /* Evita la ripetizione */
+  min-height: 100vh; /* Assicura che lo sfondo copra l'intera altezza */
+}
+
+#root {
+  min-height: 100vh; /* Assicura che il contenitore radice sia alto almeno quanto la viewport */
+}
