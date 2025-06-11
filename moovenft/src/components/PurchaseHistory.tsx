@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ethers } from 'ethers';
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from '../constant/contract';
+import { CITY_IMAGES } from '../constant/contract';
+import { Link, useNavigate } from 'react-router-dom'; // Importa useNavigate
 
 interface Purchase {
     tokenId: string;
@@ -14,6 +16,8 @@ const PurchaseHistory = ({ currentAccount }: { currentAccount: string | null }) 
     const [purchases, setPurchases] = useState<Purchase[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    const navigate = useNavigate(); // Inizializza useNavigate
 
     useEffect(() => {
         const fetchPurchaseHistory = async () => {
@@ -44,7 +48,7 @@ const PurchaseHistory = ({ currentAccount }: { currentAccount: string | null }) 
                 const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
 
                 const currentBlock = await provider.getBlockNumber();
-                const fromBlock = Math.max(0, currentBlock - 10000);
+                const fromBlock = Math.max(0, currentBlock - 50000);
 
                 const filter = contract.filters.NFTPurchased(null, currentAccount);
                 const logs = await contract.queryFilter(filter, fromBlock, "latest");
@@ -80,7 +84,7 @@ const PurchaseHistory = ({ currentAccount }: { currentAccount: string | null }) 
                 setPurchases(userPurchases.reverse());
             } catch (err) {
                 console.error("Errore nel recupero degli eventi:", err);
-                setError("Errore durante il recupero dello storico.");
+                setError("Errore durante il recupero dello storico. Assicurati di essere connesso alla rete Sepolia.");
             } finally {
                 setLoading(false);
             }
@@ -89,38 +93,66 @@ const PurchaseHistory = ({ currentAccount }: { currentAccount: string | null }) 
         fetchPurchaseHistory();
     }, [currentAccount]);
 
+    // Funzione per tornare alla home
+    const handleGoHome = () => {
+        navigate('/'); // Naviga alla root (Home)
+    };
+
     if (loading) {
         return (
-            <div style={{ textAlign: 'center', padding: '20px' }}>
-                <div style={{ border: '4px solid rgba(0, 0, 0, 0.1)', borderRadius: '50%', borderTop: '4px solid #3498db', width: '40px', height: '40px', animation: 'spin 1s linear infinite', margin: '0 auto' }}></div>
-                <p style={{ color: '#333', marginTop: '10px' }}>Caricamento storico acquisti...</p>
+            <div className="text-center p-5">
+                <div className="animate-spin border-4 border-gray-200 border-t-blue-500 rounded-full w-10 h-10 mx-auto"></div>
+                <p className="text-gray-700 mt-2">Caricamento storico acquisti...</p>
             </div>
         );
     }
 
     if (error) {
         return (
-            <div style={{ backgroundColor: '#f8d7da', color: '#721c24', padding: '15px', borderRadius: '8px', margin: '20px 0', textAlign: 'center' }}>
+            <div className="bg-red-100 text-red-800 p-4 rounded-lg m-5 text-center">
                 {error}
             </div>
         );
     }
 
     return (
-        <div style={{ maxWidth: '900px', margin: '0 auto', padding: '20px' }}>
-            <h2 style={{ textAlign: 'center', marginBottom: '25px', color: '#333', fontSize: '24px', fontWeight: 'bold' }}>Storico Acquisti NFT</h2>
+        <div className="max-w-screen-xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+            <h2 className="text-3xl font-bold text-center mb-8 text-white-800">Storico Acquisti NFT</h2>
             {purchases.length === 0 ? (
-                <p style={{ textAlign: 'center', color: '#666', fontSize: '16px' }}>Nessun acquisto trovato per questo account.</p>
+                <p className="text-center text-gray-600 text-lg">Nessun acquisto trovato per questo account.</p>
             ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
-                    {purchases.map((purchase, index) => (
-                        <div key={index} style={{ backgroundColor: '#fff', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', padding: '20px', textAlign: 'center', transition: 'transform 0.2s',}}>
-                            <h3 style={{ margin: '0 0 15px', color: '#007bff', fontSize: '18px', fontWeight: '600' }}>{purchase.name || `NFT #${purchase.tokenId}`}</h3>
-                            <p style={{ margin: '8px 0', color: '#555', fontSize: '14px' }}><strong>Token ID:</strong> {purchase.tokenId}</p>
-                            {purchase.city && <p style={{ margin: '8px 0', color: '#555', fontSize: '14px' }}><strong>Città:</strong> {purchase.city}</p>}
-                            <p style={{ margin: '8px 0', color: '#555', fontSize: '14px' }}><strong>Prezzo:</strong> {purchase.price} ETH</p>
-                            <p style={{ margin: '8px 0', color: '#555', fontSize: '14px', wordBreak: 'break-all' }}><strong>Acquirente:</strong> {purchase.buyer}</p>
-                            <a href={`https://sepolia.etherscan.io/token/${CONTRACT_ADDRESS}?a=${purchase.tokenId}`} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', marginTop: '10px', color: '#007bff', textDecoration: 'none', fontSize: '14px', padding: '5px 10px', border: '1px solid #007bff', borderRadius: '5px',}}>Vedi su Etherscan</a>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                    {purchases.map((purchase) => (
+                        <div
+                            key={purchase.tokenId}
+                            className="bg-white shadow-lg rounded-lg overflow-hidden flex flex-col"
+                        >
+                            <div className="p-4 flex-1">
+                                <h3 className="text-lg font-semibold text-gray-800">
+                                    {purchase.name || `NFT #${purchase.tokenId}`}
+                                </h3>
+                                <div className="h-32 w-full overflow-hidden rounded mt-2">
+                                    <img
+                                        src={CITY_IMAGES[purchase.city || 'DefaultCity']}
+                                        alt={purchase.city || 'Città sconosciuta'}
+                                        className="object-cover h-full w-full"
+                                        loading="lazy"
+                                    />
+                                </div>
+                                <p className="text-gray-600 mt-2 text-sm">
+                                    Città: {purchase.city || "N/A"}
+                                </p>
+                                
+                            </div>
+                            <div className="p-4 border-t">
+                                {/* BOTTONE "TORNA ALLA HOME" */}
+                                <button
+                                    onClick={handleGoHome} // Chiama la funzione di navigazione
+                                    className="block text-center bg-green-600 text-white py-2 rounded hover:bg-green-700 transition text-sm w-full" // Stile per un bottone "successo" e larghezza piena
+                                >
+                                    Torna alla Home
+                                </button>
+                            </div>
                         </div>
                     ))}
                 </div>

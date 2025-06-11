@@ -21,9 +21,17 @@ export const useMarketNFTs = (
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Funzione helper per ottenere il nome completo della città
+  const getFullCityName = (partial: string): string => {
+    const possible = Object.keys(CITY_IMAGES);
+    const found = possible.find((c) =>
+      c.toLowerCase().startsWith(partial.toLowerCase())
+    );
+    return found || partial;
+  };
+
   const fetchNFTs = useCallback(async () => {
     if (!connectedProvider) {
-      setError("Provider non connesso.");
       setItems([]);
       setLoading(false);
       return;
@@ -39,69 +47,85 @@ export const useMarketNFTs = (
         connectedProvider
       );
 
-      // Ottieni il numero totale di token coniati
-      const totalMintedBN = await contract.totalMinted();
-      const totalMinted = Number(totalMintedBN);
-
+      const totalSupplyBN = await contract.totalSupply();
+      const totalSupply = Number(totalSupplyBN);
       const fetchedNFTs: NFTItem[] = [];
 
-      for (let i = 1; i <= totalMinted; i++) {
-  const tokenId = i;
-  try {
-    const owner = await contract.ownerOf(tokenId);
-    const isForSale = await contract.isForSale(tokenId);
-    const priceWei = await contract.tokenPrices(tokenId);
-    const tokenUri = await contract.tokenURI(tokenId);
+      for (let tokenId = 1; tokenId <= totalSupply; tokenId++) {
+        try {
+          const owner = await contract.ownerOf(tokenId);
+          const isForSale = await contract.isForSale(tokenId);
+          const priceWei = await contract.tokenPrices(tokenId);
 
-    // Log del tokenURI grezzo
-    console.log(`Token ID ${tokenId} - tokenURI:`, tokenUri);
+          let tokenUri: string | null = null;
+          try {
+            tokenUri = await contract.tokenURI(tokenId);
+          } catch (uriError) {
+            console.warn(`Token ID ${tokenId} - tokenURI non disponibile:`, uriError);
+          }
 
-    // Valori di fallback
-    let name = `NFT #${tokenId}`;
-    let description = "Sconosciuta";
-    let city = "Sconosciuta";
-    let imageUrl = "";
+          // Valori di fallback
+          let name = `NFT #${tokenId}`;
+          let description = "Sconosciuta";
+          let city = "Sconosciuta";
+          let imageUrl = "";
 
-    // Parsa il tokenURI se è base64 JSON
-    if (tokenUri && tokenUri.startsWith("data:application/json;base64,")) {
-      try {
-        const base64Json = tokenUri.replace("data:application/json;base64,", "");
-        const decodedJson = atob(base64Json);
-        console.log(`Token ID ${tokenId} - Decoded JSON:`, decodedJson);
-        const metadata = JSON.parse(decodedJson);
+          if (tokenUri?.startsWith("data:application/json;base64,")) {
+            const base64Json = tokenUri.replace("data:application/json;base64,", "");
+            let decodedJson = "";
+            try {
+              decodedJson = atob(base64Json);
+              const jsonStart = decodedJson.indexOf("{");
+              if (jsonStart === -1) {
+                throw new Error("JSON non trovato");
+              }
+              let jsonStr = decodedJson.substring(jsonStart);
+              if (!jsonStr.endsWith("}")) {
+                jsonStr += '"}'; // Ripara JSON incompleto
+              }
 
-        name = metadata.name || name;
-        description = metadata.description || description;
-        city = metadata.city || metadata.City || city;
-        console.log(`Token ID ${tokenId} - Parsed Metadata:`, { name, description, city });
-        imageUrl = CITY_IMAGES[city] || "";
-      } catch (uriError) {
-        console.warn(`Errore nel parsing di tokenURI per tokenId ${tokenId}:`, uriError);
+              const metadata = JSON.parse(jsonStr);
+              name = metadata.name || name;
+              description = metadata.description || description;
+              city = metadata.city || metadata.City || city;
+              // Correggi il nome della città
+              city = getFullCityName(city);
+              imageUrl = CITY_IMAGES[city] || "";
+            } catch (parseError) {
+              console.warn(`Errore parsing tokenId ${tokenId}:`, parseError);
+              // Fallback: estrai città con regex
+              if (decodedJson) {
+                const match = decodedJson.match(/"City"\s*:\s*"([^"]*)/);
+                if (match?.[1]) {
+                  city = getFullCityName(match[1]);
+                  imageUrl = CITY_IMAGES[city] || "";
+                }
+              }
+              name = `NFT #${tokenId} (incompleto)`;
+              description = "Dati incompleti";
+            }
+          }
+
+          fetchedNFTs.push({
+            tokenId,
+            name,
+            description,
+            city,
+            price: ethers.formatEther(priceWei),
+            owner,
+            isForSale,
+            imageUrl,
+          });
+        } catch (tokenError) {
+          console.warn(`Errore per tokenId ${tokenId}:`, tokenError);
+          continue;
+        }
       }
-    } else {
-      console.warn(`Token ID ${tokenId} - tokenURI non è base64 o non presente.`);
-    }
-
-    fetchedNFTs.push({
-      tokenId,
-      name,
-      description,
-      city,
-      price: ethers.formatEther(priceWei),
-      owner,
-      isForSale,
-      imageUrl,
-    });
-  } catch (tokenError) {
-    console.warn(`Errore per tokenId ${tokenId}:`, tokenError);
-    continue;
-  }
-}
 
       setItems(fetchedNFTs);
     } catch (e: any) {
-      console.error("Errore nel recupero degli NFT:", e);
-      setError(`Errore nel caricamento degli NFT: ${e.message}`);
+      console.error("Errore fetchNFTs:", e);
+      setError(`Errore: ${e.message}`);
       setItems([]);
     } finally {
       setLoading(false);

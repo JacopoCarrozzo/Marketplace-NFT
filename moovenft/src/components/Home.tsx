@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { ethers } from "ethers";
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from "../constant/contract";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useMarketNFTs, NFTItem } from "../hooks/useMarketNFTs";
 import { CITY_IMAGES } from "../constant/contract";
 import React from "react";
@@ -10,55 +10,8 @@ import { useMint } from "../hooks/useMint";
 import { useWalletContext } from "../context/WalletContext";
 import historyIcon from "../assets/images/cronologia.png";
 import MarketPlace from "./Marketplace";
-import MyNFTs from "./MyNFTs";
+import MyNFT from "./MyNFTs";
 import AuctionPlace from "./Auctionplace";
-
-interface ChainInfo {
-  chainId: string;
-  chainName: string;
-  nativeCurrency: {
-    name: string;
-    symbol: string;
-    decimals: number;
-  };
-  rpcUrls: string[];
-  blockExplorerUrls: string[];
-}
-
-interface SupportedChains {
-  [chainId: number]: ChainInfo;
-}
-
-const SUPPORTED_CHAINS: SupportedChains = {
-  1: {
-    chainId: "0x1",
-    chainName: "Ethereum Mainnet",
-    nativeCurrency: { name: "Ethereum", symbol: "ETH", decimals: 18 },
-    rpcUrls: ["https://mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID"],
-    blockExplorerUrls: ["https://etherscan.io"],
-  },
-  137: {
-    chainId: "0x89",
-    chainName: "Polygon Mainnet",
-    nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
-    rpcUrls: ["https://polygon-rpc.com"],
-    blockExplorerUrls: ["https://polygonscan.com"],
-  },
-  56: {
-    chainId: "0x38",
-    chainName: "Binance Smart Chain Mainnet",
-    nativeCurrency: { name: "Binance Coin", symbol: "BNB", decimals: 18 },
-    rpcUrls: ["https://bsc-dataseed.binance.org/"],
-    blockExplorerUrls: ["https://bscscan.com"],
-  },
-  11155111: {
-    chainId: "0xaa36a7",
-    chainName: "Sepolia Test Network",
-    nativeCurrency: { name: "Sepolia Ethereum", symbol: "ETH", decimals: 18 },
-    rpcUrls: ["https://sepolia.infura.io/v3/YOUR_INFURA_PROJECT_ID"],
-    blockExplorerUrls: ["https://sepolia.etherscan.io"],
-  },
-};
 
 function Home() {
   const {
@@ -89,12 +42,12 @@ function Home() {
     fetchMintCost();
   }, [provider]);
 
- const {
-  mintNFT,
-  minting: mintPending,
-  mintError,
-  mintSuccess,
-} = useMint(signer, () => console.log("Minting completato con successo"));
+  const {
+    mintNFT,
+    minting: mintPending,
+    mintError,
+    mintSuccess,
+  } = useMint(signer, () => console.log("Minting completato con successo"));
 
   const [contractOwnerAddress, setContractOwnerAddress] = useState<string | null>(null);
   const [selectedNFT, setSelectedNFT] = React.useState<NFTItem | null>(null);
@@ -114,6 +67,10 @@ function Home() {
   >(null);
 
   const { items: marketNFTs, loading: loadingMarketNFTs, error: marketNFTsError, fetchNFTs: fetchMarketNFTs } = useMarketNFTs(provider);
+
+  const navigate = useNavigate();
+  const location = useLocation();
+  const currentPath = location.pathname;
 
   useEffect(() => {
     const fetchContractOwner = async () => {
@@ -136,9 +93,6 @@ function Home() {
   const onNFTActionForAuction = useCallback(() => {
     if (auctionRefreshFunction) auctionRefreshFunction();
   }, [auctionRefreshFunction]);
-
-  const location = useLocation();
-  const currentPath = location.pathname;
 
   const handleBuyNFTFromHome = async (nft: NFTItem) => {
     if (!signer || !balanceInfo.address) {
@@ -238,7 +192,7 @@ function Home() {
 
   const handleStartAuction = async () => {
     if (!signer || !walletConnected) {
-      alert("Per favore, connetti il tuo wallet.");
+      alert("Per favor, connetti il tuo wallet.");
       return;
     }
     if (!tokenIdToAuction || !durationToAuction) {
@@ -262,6 +216,24 @@ function Home() {
         setIsAuctionPending(false);
         return;
       }
+
+      // --- INIZIO LOGICA AGGIORNATA: Controllo dell'asta esistente e attiva ---
+      const contractRead = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
+      const auction = await contractRead.auctions(Number(tokenIdToAuction));
+
+      // currentTime in secondi (Unix timestamp)
+      const currentTimeInSeconds = Math.floor(Date.now() / 1000); 
+
+      // Controlla se esiste un'asta E se NON è terminata
+      // auction.endTime è la timestamp di fine dell'asta.
+      // Se auction.endTime > currentTimeInSeconds, significa che l'asta è ancora attiva.
+      if (Number(auction.endTime) !== 0 && Number(auction.endTime) > currentTimeInSeconds) {
+        alert("Questo NFT ha già un'asta esistente attiva. Non può essere rimesso all'asta.");
+        setIsAuctionPending(false);
+        return; // Interrompe l'esecuzione della funzione
+      }
+      // --- FINE LOGICA AGGIORNATA ---
+
       const tx = await contract.startAuction(Number(tokenIdToAuction), durationSeconds);
       await tx.wait();
       alert(`Asta avviata per NFT #${tokenIdToAuction} (durata: ${durationSeconds}s).`);
@@ -270,7 +242,9 @@ function Home() {
     } catch (e: any) {
       console.error("Errore in startAuction:", e);
       setAuctionError(e.reason || e.message);
-    } finally { setIsAuctionPending(false); }
+    } finally {
+      setIsAuctionPending(false);
+    }
   };
 
   return (
@@ -287,13 +261,22 @@ function Home() {
                 price: price.toString(),
               } as NFTItem)
             }
+            isForSale={selectedNFT.isForSale} 
+            isOwnedByUser={false}
           />
         </div>
       ) : (
         <>
           {currentPath === "/" && (
             <>
-              <div className="fixed top-4 mt-8 right-4 w-64 bg-white shadow-lg rounded-lg p-4">
+              {/* MODIFICA QUI: Classi condizionali per posizionamento del wallet div */}
+              <div
+                className={`w-64 bg-white shadow-lg rounded-lg p-4 z-10 ${
+                  !walletConnected
+                    ? "absolute top-[10%] left-1/2 -translate-x-1/2 -translate-y-1/2" // 10% dall'alto quando non connesso
+                    : "fixed top-4 mt-4 right-4" // Posizione originale quando connesso
+                }`}
+              >
                 <h2 className="text-lg font-semibold text-gray-700 text-center text-sm">Wallet</h2>
                 {!walletConnected ? (
                   <button
@@ -341,64 +324,72 @@ function Home() {
                   {mintError && <div className="text-red-500 mt-2 text-center">Error minting: {mintError}</div>}
                 </div>
               )}
-              <div className="p-4 rounded-lg shadow-xl mb-8">
-                <h3 className="text-2xl font-bold text-white mb-4 text-center">Novità nel Marketplace</h3>
-                {loadingMarketNFTs ? (
-                  <p className="text-center text-gray-400">Caricamento NFT in vendita...</p>
-                ) : marketNFTsError ? (
-                  <p className="text-center text-red-400">Errore: {marketNFTsError}</p>
-                ) : marketNFTs.filter(nft => nft.isForSale).length === 0 ? (
-                  <p className="text-center text-gray-400">Nessun NFT in vendita al momento.</p>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-                      {marketNFTs
-                        .filter((nft) => nft.isForSale)
-                        .slice(0, 3)
-                        .map((nft: NFTItem) => (
-                          <div
-                            key={nft.tokenId}
-                            className="bg-white shadow-lg rounded-lg overflow-hidden flex flex-col"
-                          >
-                            <div className="p-4 flex-1">
-                              <h4 className="text-lg font-semibold text-gray-800">{nft.name} {nft.city}</h4>
-                              <div className="h-24 w-full overflow-hidden rounded">
-                                <img src={CITY_IMAGES[nft.city]} alt={nft.city} className="object-cover h-full w-full" />
-                              </div>
-                              <p className="text-gray-600 mt-2 text-sm">Città: {nft.city}</p>
-                              <p className="text-gray-800 font-bold mt-auto text-sm">Prezzo: {nft.price} ETH</p>
-                            </div>
-                            <div className="p-4 border-t flex space-x-2">
-                              <button
-                                onClick={() => handleBuyNFTFromHome(nft)}
-                                className="flex-1 text-center bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition text-sm"
-                              >
-                                Acquista
-                              </button>
-                              <button
-                                onClick={() => setSelectedNFT(nft)}
-                                className="flex-1 block text-center bg-gray-200 text-gray-800 py-2 rounded hover:bg-gray-300 transition"
-                              >
-                                Mostra Info
-                              </button>
-                            </div>
+              {/* START: Modifica per la visibilità del Marketplace */}
+              {walletConnected && ( // Mostra il div solo se il wallet è connesso
+                <div className="p-4 rounded-lg shadow-xl mb-8">
+                  {loadingMarketNFTs ? (
+                    <p className="text-center text-gray-400">Caricamento NFT in vendita...</p>
+                  ) : marketNFTsError ? (
+                    <p className="text-center text-red-400">Errore: {marketNFTsError}</p>
+                  ) : marketNFTs.filter(nft => nft.isForSale).length === 0 ? ( // Se wallet connesso e nessun NFT
+                    <p className="text-center text-gray-400">Nessun NFT in vendita al momento.</p>
+                  ) : ( // Se wallet connesso e ci sono NFT in vendita
+                    <>
+                      <h3 className="text-2xl font-bold text-white mb-4 text-center">Novità nel Marketplace</h3>
+                      <div className="flex justify-center">
+                        <div className="w-full md:w-3/4 px-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {marketNFTs
+                              .filter((nft) => nft.isForSale)
+                              .slice(0, 3)
+                              .map((nft: NFTItem) => (
+                                <div
+                                  key={nft.tokenId}
+                                  className="bg-white shadow-sm rounded-lg overflow-hidden flex flex-col"
+                                >
+                                  <div className="p-4 flex-1">
+                                    <h4 className="text-lg font-semibold text-gray-800">
+                                      {nft.name} {nft.city}
+                                    </h4>
+                                    <div className="h-40 w-full overflow-hidden rounded mt-2">
+                                      <img
+                                        src={CITY_IMAGES[nft.city]}
+                                        alt={nft.city}
+                                        className="object-cover h-full w-full"
+                                        loading="lazy"
+                                      />
+                                    </div>
+                                    <p className="text-gray-600 mt-3">Città: {nft.city}</p>
+                                    <p className="text-gray-800 font-bold mt-2">Prezzo: {nft.price} ETH</p>
+                                  </div>
+                                  <div className="p-4 border-t flex space-x-2">
+                                    <button
+                                      onClick={() => handleBuyNFTFromHome(nft)}
+                                      className="flex-1 text-center bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition"
+                                    >
+                                      Acquista
+                                    </button>
+                                    <button
+                                      onClick={() => navigate("/MARKETPLACE")}
+                                      className="flex-1 text-center bg-green-500 text-black py-2 rounded hover:bg-green-600 transition"
+                                    >
+                                      Vai al Marketplace
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
                           </div>
-                        ))}
-                    </div>
-                    {marketNFTs.filter(nft => nft.isForSale).length > 3 && (
-                      <div className="text-center mt-6">
-                        <Link to="/MARKETPLACE" className="text-indigo-400 hover:underline font-semibold text-lg">
-                          Vedi tutti gli NFT in vendita →
-                        </Link>
+                        </div>
                       </div>
-                    )}
-                  </>
-                )}
-              </div>
+                    </>
+                  )}
+                </div>
+              )}
+              {/* END: Modifica per la visibilità del Marketplace */}
               {walletConnected && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
                   <div className="p-6 mt-4 mb-8 bg-white shadow-lg rounded-lg">
-                    <h3 className="text-lg font-semibold text-gray-700 text-center mb-4">Metti il tuo NFT in Vendita</h3>
+                    <h3 className="text-lg font-semibold text-gray-700 text-center mb-4 mt-6">Metti il tuo NFT in Vendita</h3>
                     <p className="text-gray-600 mb-4 text-center">Inserisci l'ID del Token che possiedi e il prezzo in ETH.</p>
                     <div className="mb-4">
                       <label htmlFor="tokenIdToList" className="block text-gray-700 text-sm font-bold mb-2">Token ID:</label>
@@ -459,7 +450,7 @@ function Home() {
                     <button
                       onClick={handleStartAuction}
                       disabled={!walletConnected || !correctChain || isAuctionPending}
-                      className="w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-purple-500 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {isAuctionPending ? "Avvio Asta... (Conferma in MetaMask)" : "Metti in Vendita all'Asta"}
                     </button>
@@ -469,12 +460,12 @@ function Home() {
               )}
             </>
           )}
-          {currentPath === "/MY NFT" && provider && signer && (
-            <MyNFTs
+          {currentPath === "/my-nft" && provider && signer && (
+            <MyNFT
               connectedProvider={provider}
               walletAddress={balanceInfo.address}
               signer={signer}
-              onNFTAction={() => {}}
+              onNFTAction={() => {}} // Questa funzione potrebbe dover triggerare un refresh anche qui
               setMarketplaceRefreshFunction={setMarketplaceRefreshFunction}
             />
           )}
@@ -489,9 +480,6 @@ function Home() {
           )}
           {currentPath === "/ASTE" && provider && signer && (
             <AuctionPlace
-              connectedProvider={provider}
-              walletAddress={balanceInfo.address}
-              signer={signer}
               onNFTAction={onNFTActionForAuction}
               setAuctionRefreshFunction={setAuctionRefreshFunction}
             />

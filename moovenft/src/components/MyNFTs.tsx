@@ -22,6 +22,7 @@ const MyNFT: React.FC<MyNFTProps> = ({
   onNFTAction,
   setMarketplaceRefreshFunction,
 }) => {
+   console.log("MyNFT component rendered");
   const { items: nfts, loading, error, fetchNFTs } = useMarketNFTs(connectedProvider);
   const [selectedNFT, setSelectedNFT] = useState<NFTItem | null>(null);
 
@@ -29,11 +30,35 @@ const MyNFT: React.FC<MyNFTProps> = ({
   useEffect(() => {
     setMarketplaceRefreshFunction(() => fetchNFTs);
   }, [fetchNFTs, setMarketplaceRefreshFunction]);
-
+  
   // Aggiorna la lista degli NFT quando cambia onNFTAction
   useEffect(() => {
     onNFTAction();
   }, [onNFTAction, fetchNFTs]);
+
+  // Log aggiuntivi per verificare gli owner direttamente dal contratto
+  useEffect(() => {
+    const checkOwners = async () => {
+      if (!connectedProvider || !nfts.length) return;
+
+      const contract = new ethers.Contract(
+        CONTRACT_ADDRESS,
+        CONTRACT_ABI,
+        connectedProvider
+      );
+
+      for (const nft of nfts) {
+        try {
+          const owner = await contract.ownerOf(Number(nft.tokenId));
+          console.log(`Token ID ${nft.tokenId} - Owner dal contratto:`, owner);
+        } catch (err) {
+          console.error(`Errore nel recuperare owner per tokenId ${nft.tokenId}:`, err);
+        }
+      }
+    };
+
+    checkOwners();
+  }, [nfts, connectedProvider]);
 
   // Funzione per mettere in vendita un NFT
   const handleListForSale = async (nft: NFTItem, priceInEth: string) => {
@@ -56,6 +81,7 @@ const MyNFT: React.FC<MyNFTProps> = ({
 
       // Verifica che l'utente sia il proprietario
       const onChainOwner = await contractRead.ownerOf(Number(nft.tokenId));
+      console.log(`Token ID ${nft.tokenId} - onChainOwner:`, onChainOwner);
       if (onChainOwner.toLowerCase() !== walletAddress.toLowerCase()) {
         alert("Non sei il proprietario di questo NFT!");
         return;
@@ -63,15 +89,22 @@ const MyNFT: React.FC<MyNFTProps> = ({
 
       // Verifica che l'NFT non sia già in vendita
       const isForSaleOnChain = await contractRead.isForSale(Number(nft.tokenId));
+      console.log(`Token ID ${nft.tokenId} - isForSale:`, isForSaleOnChain);
       if (isForSaleOnChain) {
         alert("Questo NFT è già in vendita!");
         return;
       }
 
       // Convalida il prezzo
-      const priceInWei = ethers.parseEther(priceInEth);
-      if (priceInWei <= 0) {
-        alert("Il prezzo deve essere maggiore di zero.");
+      let priceInWei: bigint;
+      try {
+        priceInWei = ethers.parseEther(priceInEth);
+        if (priceInWei <= 0) {
+          alert("Il prezzo deve essere maggiore di zero.");
+          return;
+        }
+      } catch {
+        alert("Prezzo non valido. Inserisci un numero valido in ETH.");
         return;
       }
 
@@ -86,30 +119,40 @@ const MyNFT: React.FC<MyNFTProps> = ({
       try {
         await contractWrite.listForSale.estimateGas(Number(nft.tokenId), priceInWei);
       } catch (gasError: any) {
-        console.error("Errore stima gas:", gasError);
-        alert(`Errore di gas: ${gasError.reason || gasError.message || "Transazione fallita"}`);
+        console.error(`Errore stima gas per tokenId ${nft.tokenId}:`, gasError);
+        alert(
+          `Errore di gas: ${gasError.reason || gasError.message || "Transazione fallita"}`
+        );
         return;
       }
 
       // Invia la transazione
-      console.log(`Tentativo di mettere in vendita NFT ${nft.tokenId} per ${priceInEth} ETH`);
+      console.log(`Metto in vendita NFT ${nft.tokenId} per ${priceInEth} ETH`);
       const tx = await contractWrite.listForSale(Number(nft.tokenId), priceInWei);
-      console.log("Hash transazione:", tx.hash);
+      console.log(`Hash transazione:`, tx.hash);
       await tx.wait();
-      console.log("Transazione di vendita confermata!");
+      console.log(`Transazione confermata per tokenId ${nft.tokenId}`);
 
       alert(`NFT #${nft.tokenId} messo in vendita con successo!`);
       onNFTAction(); // Aggiorna la lista
     } catch (e: any) {
-      console.error("Errore durante la messa in vendita dell'NFT:", e);
-      alert(`Errore: ${e.reason || e.message || "Errore sconosciuto"}`);
+      console.error(`Errore messa in vendita NFT ${nft.tokenId}:`, e);
+      alert(
+        `Errore: ${e.reason || e.message || "Errore sconosciuto"}`
+      );
     }
   };
 
   // Filtra solo gli NFT posseduti dall'utente
-  const ownedNFTs = nfts.filter(
-    (nft) => walletAddress && nft.owner.toLowerCase() === walletAddress.toLowerCase()
-  );
+  const ownedNFTs = walletAddress
+    ? nfts.filter(
+        (nft) => nft.owner.toLowerCase() === walletAddress.toLowerCase()
+      )
+    : [];
+
+  // Log per vedere tutti gli NFT e quelli posseduti
+  console.log("All NFTs:", nfts);
+  console.log("Owned NFTs:", ownedNFTs);
 
   return (
     <div className="max-w-full mx-auto px-6 py-12">
@@ -123,14 +166,19 @@ const MyNFT: React.FC<MyNFTProps> = ({
       {error && (
         <p className="text-center text-red-500 text-lg">Errore: {error}</p>
       )}
+      {!walletAddress && (
+        <p className="text-center text-white text-lg">
+          Connetti il tuo wallet per vedere i tuoi NFT.
+        </p>
+      )}
 
-      {!loading && !error && ownedNFTs.length === 0 && (
+      {!loading && !error && walletAddress && ownedNFTs.length === 0 && (
         <p className="text-center text-white text-lg">
           Non possiedi nessun NFT al momento.
         </p>
       )}
 
-      {!selectedNFT && (
+      {!selectedNFT && ownedNFTs.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
           {ownedNFTs.map((nft) => (
             <div
@@ -139,7 +187,7 @@ const MyNFT: React.FC<MyNFTProps> = ({
             >
               <div className="p-4 flex-1">
                 <h3 className="text-lg font-semibold text-gray-800">
-                  {nft.name} {nft.city}
+                  {nft.name}
                 </h3>
                 <div className="h-32 w-full overflow-hidden rounded">
                   <img
@@ -149,26 +197,12 @@ const MyNFT: React.FC<MyNFTProps> = ({
                   />
                 </div>
                 <p className="text-gray-600 mt-2 text-sm">Città: {nft.city}</p>
-                <p className="text-gray-800 font-bold mt-auto text-sm">
-                  {nft.isForSale ? `In vendita: ${nft.price} ETH` : "Non in vendita"}
-                </p>
               </div>
 
               <div className="p-4 border-t flex space-x-4">
-                {!nft.isForSale && (
-                  <button
-                    onClick={() => {
-                      const price = prompt("Inserisci il prezzo in ETH:");
-                      if (price) handleListForSale(nft, price);
-                    }}
-                    className="flex-1 block text-center bg-green-600 text-gray-200 py-2 rounded hover:bg-gray-300 transition"
-                  >
-                    Metti in vendita
-                  </button>
-                )}
                 <button
                   onClick={() => setSelectedNFT(nft)}
-                  className="flex-1 block text-center bg-gray-200 text-gray-800 py-2 rounded hover:bg-gray-300 transition"
+                  className="flex-1 block text-center bg-green-500 text-black-800 py-2 rounded hover:bg-green-600 transition"
                 >
                   Mostra Info
                 </button>
@@ -184,7 +218,10 @@ const MyNFT: React.FC<MyNFTProps> = ({
             nft={selectedNFT}
             setSelectedNFT={setSelectedNFT}
             onBookClick={(price, recipient) =>
-              handleListForSale({ ...selectedNFT, price: price.toString(), owner: recipient } as NFTItem, price.toString())
+              handleListForSale(
+                { ...selectedNFT, price: price.toString(), owner: recipient } as NFTItem,
+                price.toString()
+              )
             }
           />
         </div>

@@ -1,243 +1,250 @@
 import React, { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from "../constant/contract";
-import { CITY_IMAGES } from "../constant/contract";
-import { Link } from "react-router-dom";
-import Info from "./Info";
+import { useWalletContext } from "../context/WalletContext";
+import { CITY_IMAGES } from "../constant/contract"; // Assicurati che CITY_IMAGES includa un'immagine di fallback
+import { Link } from 'react-router-dom'; // Importa Link da react-router-dom
+
+// Importa l'icona. Assicurati che il percorso sia corretto per la tua icona,
+// relativa alla posizione di questo file AuctionPlace.tsx.
+import historyIcon from '../assets/images/cronologia.png'; 
+
+// Funzione per capitalizzare la prima lettera della città
+const capitalizeFirstLetter = (str: string) => {
+  if (!str) return "";
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+};
 
 interface AuctionItem {
   tokenId: number;
-  endTime: number; // UNIX timestamp
-  highestBid: string; // in ETH (string)
+  endTime: number;
+  highestBid: string;
   highestBidder: string;
   isEnded: boolean;
-  imageUrl: string;
   name: string;
   city: string;
+  imageUrl: string; // Proprietà che conterrà l'URL dell'immagine finale
 }
 
 interface AuctionPlaceProps {
-  connectedProvider: ethers.BrowserProvider | ethers.JsonRpcProvider | null;
-  walletAddress: string | null;
-  signer: ethers.Signer | null;
-  onNFTAction: () => void; // per forzare il refresh da componenti esterni
-  setAuctionRefreshFunction: React.Dispatch<React.SetStateAction<(() => void) | null>>;
+  onNFTAction: () => void;
+  setAuctionRefreshFunction: React.Dispatch<
+    React.SetStateAction<(() => void) | null>
+  >;
 }
 
 const AuctionPlace: React.FC<AuctionPlaceProps> = ({
-  connectedProvider,
-  walletAddress,
-  signer,
   onNFTAction,
   setAuctionRefreshFunction,
 }) => {
+  const { provider, signer, walletConnected, correctChain } =
+    useWalletContext();
   const [auctions, setAuctions] = useState<AuctionItem[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [bidValues, setBidValues] = useState<{ [tokenId: number]: string }>({});
+  const [bidAmounts, setBidAmounts] = useState<{ [key: number]: string }>({}); // Stato per gli importi delle offerte
 
-  // Funzione per leggere tutte le aste attive dal contratto
   const fetchAuctions = async () => {
-    if (!connectedProvider) return;
+    if (!provider) return;
     setLoading(true);
     setError(null);
 
     try {
-      const contractRead = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, connectedProvider);
-      // Supponiamo che il contratto esponga un array di tokenIds in asta:
-      const activeTokenIds: number[] = await contractRead.getActiveAuctions(); 
-      const fetched: AuctionItem[] = [];
+      const contract = new ethers.Contract(
+        CONTRACT_ADDRESS,
+        CONTRACT_ABI,
+        provider
+      );
+      const totalMintedBN = await contract.totalMinted();
+      const totalMinted = Number(totalMintedBN);
+      const now = Math.floor(Date.now() / 1000);
+      const lista: AuctionItem[] = [];
 
-      for (let tokenId of activeTokenIds) {
-        const [
-          endTimeBigNumber,
-          highestBidWei,
-          highestBidder,
-          ended,
-        ] = await Promise.all([
-          contractRead.auctions(tokenId).then((a: any) => a.endTime),
-          contractRead.auctions(tokenId).then((a: any) => a.highestBid),
-          contractRead.auctions(tokenId).then((a: any) => a.highestBidder),
-          contractRead.auctions(tokenId).then((a: any) => a.ended),
-        ]);
+      for (let tokenId = 1; tokenId <= totalMinted; tokenId++) {
+        const auctionOnChain = await contract.auctions(tokenId);
+        const endTime: number = Number(auctionOnChain.endTime);
+        const isEnded: boolean = auctionOnChain.ended;
+        const highestBidWei: bigint = auctionOnChain.highestBid as bigint;
+        const highestBidder: string = auctionOnChain.highestBidder;
 
-        // Leggi il metadata on‐chain per nome/city (se il tuo NFT ha metadata on‐chain)
-        const tokenUri: string = await contractRead.tokenURI(tokenId);
-        // Estraggo nome e city da URI base64 (qui faccio un parse rapido, assumendo JSON base64)
-        let name = `NFT #${tokenId}`;
-        let city = "";
-        try {
-          const base64Json = tokenUri.replace("data:application/json;base64,", "");
-          const jsonString = atob(base64Json);
-          const metadata = JSON.parse(jsonString);
-          name = metadata.name;
-          city = metadata.City || "";
-        } catch {
-          // fallback se parsing fallisce
+        if (endTime > now && !isEnded) {
+          let name = `NFT #${tokenId}`;
+          let city = "sconosciuta";
+          let imageUrl = ""; 
+
+          try {
+            const [metadataName, description, metadataCity] =
+              await contract.getTokenMetadata(tokenId);
+            name = metadataName || name;
+            const lowerCaseCity = metadataCity.toLowerCase().trim();
+            city = lowerCaseCity || "sconosciuta"; 
+            
+            const cityKeyForImage = capitalizeFirstLetter(lowerCaseCity); 
+            imageUrl = CITY_IMAGES[cityKeyForImage] || CITY_IMAGES["Sconosciuta"] || "";
+
+            console.log(
+              `Raw City: ${metadataCity}, LowerCase City: ${lowerCaseCity}, Key for Image: ${cityKeyForImage}, Image URL: ${imageUrl}`
+            );
+          } catch (metadataError: any) {
+            console.error(
+              `Errore nel recuperare metadata per tokenId ${tokenId}:`,
+              metadataError.message
+            );
+            imageUrl = CITY_IMAGES["Sconosciuta"] || "";
+          }
+
+          lista.push({
+            tokenId,
+            endTime,
+            highestBid: ethers.formatEther(highestBidWei),
+            highestBidder,
+            isEnded,
+            name,
+            city,
+            imageUrl,
+          });
         }
-
-        fetched.push({
-          tokenId,
-          endTime: endTimeBigNumber.toNumber(),
-          highestBid: ethers.formatEther(highestBidWei),
-          highestBidder,
-          isEnded: ended,
-          imageUrl: CITY_IMAGES[city] || "",
-          name,
-          city,
-        });
       }
 
-      setAuctions(fetched);
+      setAuctions(lista);
     } catch (e: any) {
-      console.error("Errore fetchAuctions:", e);
-      setError("Impossibile caricare le aste. Riprova più tardi.");
+      console.error("Errore fetchAuctions:", e.message);
+      setError("Errore nel caricamento delle aste.");
     } finally {
       setLoading(false);
     }
   };
 
-  // Rendo disponibile fetchAuctions a componenti esterni (e.g., Home)
+  useEffect(() => {
+    if (provider && signer && walletConnected && correctChain) {
+      fetchAuctions();
+    }
+  }, [provider, signer, walletConnected, correctChain]);
+
   useEffect(() => {
     setAuctionRefreshFunction(() => fetchAuctions);
   }, [setAuctionRefreshFunction]);
 
-  // Ogni volta che onNFTAction cambia, rifaccio il fetch
   useEffect(() => {
-    onNFTAction();
-  }, [onNFTAction]);
+    const interval = setInterval(() => {
+      setAuctions((prev) => prev.map((a) => ({ ...a })));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
-  // Carico le aste alla mount
-  useEffect(() => {
-    fetchAuctions();
-  }, [connectedProvider]);
-
-  // Handler per fare un'offerta
-  const handleBid = async (item: AuctionItem) => {
-    if (!signer || !walletAddress) {
-      alert("Devi connettere il wallet per partecipare all'asta.");
-      return;
-    }
-    if (!connectedProvider) {
-      alert("Provider non disponibile.");
+  const handleBid = async (tokenId: number, bidAmount: string) => {
+    if (!signer || !walletConnected) {
+      alert("Devi connettere il tuo wallet per fare un'offerta.");
       return;
     }
 
-    const bidValue = bidValues[item.tokenId];
-    if (!bidValue || isNaN(Number(bidValue)) || Number(bidValue) <= parseFloat(item.highestBid)) {
-      alert(`Inserisci un importo maggiore di ${item.highestBid} ETH`);
+    if (!bidAmount || isNaN(Number(bidAmount)) || Number(bidAmount) <= 0) {
+      alert("Inserisci un importo valido per l'offerta (maggiore di zero).");
       return;
     }
 
-    const priceInWei = ethers.parseEther(bidValue);
+    const contract = new ethers.Contract(
+      CONTRACT_ADDRESS,
+      CONTRACT_ABI,
+      signer
+    );
 
     try {
-      const contractWrite = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
-      // Verifico che l'asta non sia già terminata on‐chain
-      const auctionData: any = await contractWrite.auctions(item.tokenId);
-      const now = Math.floor(Date.now() / 1000);
-      if (now >= auctionData.endTime.toNumber()) {
-        alert("L'asta è già terminata.");
+      setLoading(true); 
+
+      const auction = await contract.auctions(tokenId);
+      const currentHighestBidWei: bigint = auction.highestBid as bigint;
+      const bidInWei = ethers.parseEther(bidAmount); 
+
+      if (bidInWei <= currentHighestBidWei) {
+        alert("L'offerta deve essere superiore all'offerta attuale.");
         return;
       }
 
-      // Stimo gas
-      try {
-        await contractWrite.bid.estimateGas(item.tokenId, { value: priceInWei });
-      } catch (gasError: any) {
-        console.error("Errore estimateGas bid:", gasError);
-        alert("Errore di gas: " + (gasError.reason || gasError.message || ""));
-        return;
-      }
+      console.log(`Sending bid for tokenId ${tokenId} with value ${bidAmount} ETH`);
+      const tx = await contract.bid(tokenId, { value: bidInWei });
+      console.log(`Transaction hash: ${tx.hash}`);
+      await tx.wait(); 
+      console.log("Transaction confirmed.");
 
-      // Inoltro l'offerta
-      const tx = await contractWrite.bid(item.tokenId, { value: priceInWei });
-      await tx.wait();
-      alert(`Offerta di ${bidValue} ETH inviata per NFT #${item.tokenId}!`);
-      fetchAuctions();
-      onNFTAction();
+      alert("Offerta inviata con successo!");
+      fetchAuctions(); 
+      onNFTAction();   
+      setBidAmounts(prev => { 
+        const newAmounts = { ...prev };
+        delete newAmounts[tokenId];
+        return newAmounts;
+      });
     } catch (e: any) {
-      console.error("Errore durante la bid:", e);
-      alert("Errore nell'offerta: " + (e.reason || e.message || ""));
+      console.error("Errore durante l'invio dell'offerta:", e);
+      alert(
+        "Errore durante l'invio dell'offerta: " +
+          (e.reason || e.code || e.message || "Errore sconosciuto")
+      );
+    } finally {
+      setLoading(false); 
     }
   };
 
-  // Handler per concludere l'asta (solo owner/admin)
-  const handleFinalize = async (item: AuctionItem) => {
-    if (!signer) {
-      alert("Devi connettere il wallet per concludere l'asta.");
-      return;
-    }
-    try {
-      const contractWrite = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
-      const tx = await contractWrite.finalizeAuction(item.tokenId);
-      await tx.wait();
-      alert(`Asta per NFT #${item.tokenId} conclusa.`);
-      fetchAuctions();
-      onNFTAction();
-    } catch (e: any) {
-      console.error("Errore finalizeAuction:", e);
-      alert("Errore nel concludere l'asta: " + (e.reason || e.message || ""));
-    }
-  };
-
-  // Handler per ritirare rimborso
-  const handleWithdraw = async (item: AuctionItem) => {
-    if (!signer) {
-      alert("Devi connettere il wallet per ritirare il rimborso.");
-      return;
-    }
-    try {
-      const contractWrite = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
-      const tx = await contractWrite.withdrawRefund(item.tokenId);
-      await tx.wait();
-      alert(`Rimborso ritirato per NFT #${item.tokenId}.`);
-      fetchAuctions();
-      onNFTAction();
-    } catch (e: any) {
-      console.error("Errore withdrawRefund:", e);
-      alert("Errore nel ritirare il rimborso: " + (e.reason || e.message || ""));
-    }
-  };
+  if (!walletConnected)
+    return (
+      <div className="p-6 text-center text-gray-700">
+        Connetti il wallet per vedere le aste.
+      </div>
+    );
+  if (!correctChain)
+    return (
+      <div className="p-6 text-center text-gray-700">
+        Connettiti alla chain corretta.
+      </div>
+    );
 
   return (
-    <div className="max-w-full mx-auto px-6 py-12">
-      <h2 className="text-3xl font-bold text-center mb-8 text-white">
-        Aste NFT
-      </h2>
+    // Aggiungi un div contenitore per posizionamento relativo o header
+    <div className="relative max-w-full mx-auto px-4 py-12"> 
+      {/* Blocco del link per lo storico acquisti */}
+      <div className="absolute top-4 left-4 z-10"> {/* Usa absolute per posizionamento relativo al genitore */}
+        <Link to="/AuctionHistory" className="text-blue-600 hover:text-blue-800 flex items-center space-x-2">
+          <img src={historyIcon} alt="Storico" className="w-5 h-5 filter invert" />
+          <span className="text-md font-semibold text-white">Aste Concluse</span>
+        </Link>
+      </div>
 
+      <h2 className="text-3xl font-bold text-center mb-8 text-white mt-12"> {/* Aggiungi mt-12 per compensare il link */}
+        Aste Attive
+      </h2>
       {loading && (
-        <p className="text-center text-white text-lg">Caricamento aste…</p>
+        <p className="text-center text-white text-lg">Caricamento...</p>
       )}
       {error && (
-        <p className="text-center text-red-500 text-lg">Errore: {error}</p>
+        <p className="text-center text-red-500 text-lg">{error}</p>
       )}
-
       {!loading && !error && auctions.length === 0 && (
-        <p className="text-center text-white text-lg">
-          Nessuna asta attiva al momento.
-        </p>
+        <p className="text-center text-white text-lg">Nessuna asta attiva.</p>
       )}
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
         {auctions.map((item) => {
           const now = Math.floor(Date.now() / 1000);
-          const isExpired = now >= item.endTime;
           const countdownSeconds = Math.max(item.endTime - now, 0);
-          const countdown = new Date(countdownSeconds * 1000)
-            .toISOString()
-            .substr(11, 8); // HH:MM:SS
+          const countdown = `${String(
+            Math.floor(countdownSeconds / 3600)
+          ).padStart(2, "0")}:${String(
+            Math.floor((countdownSeconds % 3600) / 60)
+          ).padStart(2, "0")}:${String(countdownSeconds % 60).padStart(
+            2,
+            "0"
+          )}`;
 
           return (
             <div
               key={item.tokenId}
               className="bg-white shadow-lg rounded-lg overflow-hidden flex flex-col"
             >
-              <div className="p-4 flex-1">
+              <div className="p-4 flex-1 flex flex-col">
                 <h3 className="text-lg font-semibold text-gray-800">
-                  {item.name} {item.city}
+                  {item.name} ({item.city})
                 </h3>
-                <div className="h-32 w-full overflow-hidden rounded">
+                <div className="h-32 w-full overflow-hidden rounded mt-2 bg-gray-200">
                   {item.imageUrl ? (
                     <img
                       src={item.imageUrl}
@@ -245,81 +252,46 @@ const AuctionPlace: React.FC<AuctionPlaceProps> = ({
                       className="object-cover h-full w-full"
                     />
                   ) : (
-                    <div className="h-full w-full bg-gray-200 flex items-center justify-center">
-                      <span className="text-gray-500 text-sm">
-                        Immagine non disponibile
-                      </span>
-                    </div>
+                    <span className="text-gray-500 text-sm p-2">
+                      Immagine non disponibile
+                    </span>
                   )}
                 </div>
+                <p className="text-gray-600 mt-2 text-sm">Città: {item.city}</p>
                 <p className="text-gray-600 mt-2 text-sm">
-                  Città: {item.city}
-                </p>
-                <p className="text-gray-800 font-bold mt-1 text-sm">
-                  Offerta Massima: {item.highestBid} ETH
+                  Offerta attuale: {item.highestBid} ETH
                 </p>
                 <p className="text-gray-600 mt-1 text-xs">
-                  {isExpired
-                    ? "Asta scaduta"
-                    : `Tempo rimanente: ${countdown}`}
+                  Tempo rimanente: {countdownSeconds > 0 ? countdown : "Scaduta"}
                 </p>
-                {item.isEnded && (
-                  <p className="text-red-500 mt-1 text-xs">
-                    Conclusa
-                  </p>
-                )}
+                <div className="mt-4">
+                  <input
+                    type="number"
+                    step="0.0001" 
+                    placeholder="Importo offerta (ETH)"
+                    className="w-full p-2 border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-gray-900"
+                    value={bidAmounts[item.tokenId] || ""}
+                    onChange={(e) =>
+                      setBidAmounts({
+                        ...bidAmounts,
+                        [item.tokenId]: e.target.value,
+                      })
+                    }
+                    disabled={countdownSeconds <= 0} 
+                  />
+                </div>
               </div>
-
-              <div className="p-4 border-t flex flex-col space-y-2">
-                {!item.isEnded && !isExpired && (
-                  <>
-                    <input
-                      type="text"
-                      placeholder={`Ex: >${item.highestBid}`}
-                      value={bidValues[item.tokenId] || ""}
-                      onChange={(e) =>
-                        setBidValues((prev) => ({
-                          ...prev,
-                          [item.tokenId]: e.target.value,
-                        }))
-                      }
-                      className="w-full border border-gray-300 rounded p-2 text-sm"
-                    />
-                    <button
-                      onClick={() => handleBid(item)}
-                      className="block w-full text-center bg-green-600 text-white py-2 rounded hover:bg-green-500 transition"
-                    >
-                      Fai Offerta
-                    </button>
-                  </>
-                )}
-
-                {isExpired && !item.isEnded && (
-                  <button
-                    onClick={() => handleFinalize(item)}
-                    className="block w-full text-center bg-purple-600 text-white py-2 rounded hover:bg-purple-500 transition"
-                  >
-                    Concludi Asta
-                  </button>
-                )}
-
-                {item.isEnded && (
-                  <button
-                    onClick={() => handleWithdraw(item)}
-                    className="block w-full text-center bg-yellow-600 text-white py-2 rounded hover:bg-yellow-500 transition"
-                  >
-                    Ritira Rimborso
-                  </button>
-                )}
-
+              <div className="p-4 border-t">
                 <button
-                  onClick={() => (
-                    // Se vuoi mostrare un dettaglio con Info come nel MarketPlace
-                    setBidValues((prev) => ({ ...prev })) // placeholder
-                  )}
-                  className="block w-full text-center bg-gray-200 text-gray-800 py-2 rounded hover:bg-gray-300 transition"
+                  onClick={() => handleBid(item.tokenId, bidAmounts[item.tokenId])}
+                  className={`w-full py-2 rounded transition ${
+                    loading || countdownSeconds <= 0
+                      ? "bg-gray-400 cursor-not-allowed"
+                      : "bg-green-600 text-white hover:bg-green-500"
+                  }`}
+                  disabled={loading || countdownSeconds <= 0} 
                 >
-                  Mostra Info
+                  {loading ? "Invio in corso..." : "Fai Offerta"}
                 </button>
               </div>
             </div>

@@ -10,7 +10,7 @@ const Navbar = () => {
             <Link to="/" className="hover:text-black transition text-white">HOME</Link>
           </li>
           <li>
-            <Link to="/MY NFT" className="hover:text-black transition text-white">MY NFT</Link>
+            <Link to="/my-nft" className="hover:text-black transition text-white">MY NFT</Link>
           </li>
           <li>
             <Link to="/MARKETPLACE" className="hover:text-black transition text-white">MARKETPLACE</Link>
