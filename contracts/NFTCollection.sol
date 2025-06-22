@@ -86,6 +86,9 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
         ERC721(name_, symbol_)
         VRFConsumerBaseV2Plus(vrfCoordinator_)
     {
+        // Verifica che numWords sia maggiore di zero
+        require(numWords_ > 0, "numWords must be > 0");
+
         vrfCoordinator   = vrfCoordinator_;
         s_keyHash        = keyHash_;
         callbackGasLimit = callbackGasLimit_;
@@ -137,7 +140,6 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
 
     function buyNFT(uint256 tokenId) external payable {
         require(isForSale[tokenId], "Questo NFT non e' in vendita");
-
         uint256 price = tokenPrices[tokenId];
         require(msg.value >= price, "Fondi insufficienti");
 
@@ -151,6 +153,8 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
 
         // 2) Trasferisci l’NFT dal contratto al compratore
         _transfer(address(this), msg.sender, tokenId);
+         address buyer = msg.sender;
+
 
         // 3) Invia i fondi al venditore originale
         (bool sent, ) = payable(seller).call{ value: price }("");
@@ -164,6 +168,13 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
         }
 
         emit NFTPurchased(tokenId, msg.sender, price);
+
+        if (msg.value > price) {
+        uint256 diff = msg.value - price;
+        (bool refundSent, ) = payable(buyer).call{ value: diff }("");
+        require(refundSent, "Rimborso fallito");
+    }
+
     }
 
     function totalMinted() public view returns (uint256) {
@@ -318,27 +329,36 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
     }
 
     /// @notice Conclude l’asta, trasferisce NFT al vincitore e invia l’Ether all’owner
-    function finalizeAuction(uint256 tokenId) external onlyOwner {
-        Auction storage auction = auctions[tokenId];
-        require(auction.endTime != 0, "Asta non esistente");
-        require(msg.sender == owner() || msg.sender == auction.highestBidder, "Solo owner o vincitore");
-        require(block.timestamp >= auction.endTime, "Asta non ancora terminata");
-        require(!auction.ended, "Asta conclusa");
+   function finalizeAuction(uint256 tokenId) external onlyOwner {
+    Auction storage a = auctions[tokenId];
 
-        auction.ended = true;
+    // 2) Copio in variabili locali (in “memory” / stack) i campi che mi servono
+    uint256 endTime       = a.endTime;
+    address highestBidder = a.highestBidder;
+    uint256 highestBid    = a.highestBid;
+    bool    alreadyEnded  = a.ended;
 
-        // Se c’è almeno un’offerta vincente, trasferisci l’NFT
-        if (auction.highestBidder != address(0)) {
-            _transfer(address(this), auction.highestBidder, tokenId);
-            // Invia l’importo all’owner/admin (o a un indirizzo di destinazione)
-            payable(owner()).transfer(auction.highestBid);
-            emit AuctionEnded(tokenId, auction.highestBidder, auction.highestBid);
-        } else {
-            // Se nessuno ha offerto, restituisci l’NFT all’owner
-            _transfer(address(this), owner(), tokenId);
-            emit AuctionEnded(tokenId, address(0), 0);
-        }
+    // 3) Tutti i require su variabili locali
+    require(endTime != 0,                           "Asta non esistente");
+    require(msg.sender == owner() 
+         || msg.sender == highestBidder,            "Solo owner o vincitore");
+    require(block.timestamp >= endTime,              "Asta non ancora terminata");
+    require(!alreadyEnded,                           "Asta conclusa");
+
+    // 4) Unica scrittura in storage
+    a.ended = true;
+
+    // --- Ora uso le copie locali per fare trasferimenti ed eventi ---
+    if (highestBidder != address(0)) {
+        _transfer(address(this), highestBidder, tokenId);
+        payable(owner()).transfer(highestBid);
+        emit AuctionEnded(tokenId, highestBidder, highestBid);
+    } else {
+        _transfer(address(this), owner(), tokenId);
+        emit AuctionEnded(tokenId, address(0), 0);
     }
+}
+
 
     /// @notice Permette a chi ha fatto offerte perdenti di ritirare il rimborso
     function withdrawRefund(uint256 tokenId) external {
