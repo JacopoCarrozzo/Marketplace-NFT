@@ -8,7 +8,8 @@ interface WalletContextType {
   balanceInfo: { address: string | null; ethBalance: string | null };
   connectWallet: () => Promise<void>;
   correctChain: boolean;
-  provider: ethers.BrowserProvider | null;
+  // *** MODIFICA QUI: Aggiungi ethers.JsonRpcProvider come tipo possibile per 'provider' ***
+  provider: ethers.BrowserProvider | ethers.JsonRpcProvider | null;
   signer: ethers.Signer | null;
   switchChain: () => Promise<boolean>;
   disconnectWallet: () => void;

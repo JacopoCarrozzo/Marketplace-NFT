@@ -44,7 +44,7 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
     mapping(uint256 => uint256) public tokenPrices;
     mapping(uint256 => bool) public isForSale;
     mapping(uint256 => bool) private usedNumbers;
-    // Mapping per salvare chi è il venditore “reale” quando l’NFT è in escrow
+    // Mapping to save the "real" seller when the NFT is in escrow
     mapping(uint256 => address) public sellers;
 
     struct Auction {
@@ -53,12 +53,15 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
         address highestBidder;
         uint256 highestBid;
         bool ended;
-        mapping(address => uint256) bids; // saldo rimborsi per ciascun offerente
+        mapping(address => uint256) bids; // refund balance for each bidder
     }
-    // Mapping da tokenId a Auction
+    // Mapping from tokenId to Auction
     mapping(uint256 => Auction) public auctions;
 
-    // Eventi
+    // Mapping to track the original seller of the NFT put up for auction
+    mapping(uint256 => address) public auctionSellers;
+
+    // Events
     event RandomNumberRequested (uint256 indexed tokenId, uint256 requestId);
     event RandomNumberFulfilled (uint256 indexed tokenId, uint256 randomNumber);
     event TokenMinted (uint256 indexed tokenId);
@@ -68,7 +71,15 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
     event NFTPurchased(uint256 indexed tokenId, address indexed buyer, uint256 price);
     event AuctionStarted(uint256 indexed tokenId, uint256 endTime);
     event NewBid(uint256 indexed tokenId, address indexed bidder, uint256 amount);
-    event AuctionEnded(uint256 indexed tokenId, address winner, uint256 amount);
+    
+    // NEW, CORRECTED DEFINITION
+event AuctionEnded(
+    uint256 indexed tokenId, // You had this as indexed already, good!
+    address winner,
+    uint256 amount,
+    address indexed originalSeller, // New argument, indexed for easy filtering
+    uint256 auctionEndTime      // New argument
+);
     event RefundWithdrawn(uint256 indexed tokenId, address indexed bidder, uint256 amount);
     
 
@@ -86,7 +97,7 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
         ERC721(name_, symbol_)
         VRFConsumerBaseV2Plus(vrfCoordinator_)
     {
-        // Verifica che numWords sia maggiore di zero
+        // Verify that numWords is greater than zero
         require(numWords_ > 0, "numWords must be > 0");
 
         vrfCoordinator   = vrfCoordinator_;
@@ -98,9 +109,9 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
         mintingCost = initialMintingCost;
         maxSupply   = initialMaxSupply;
 
-        _tokenIdCounter.increment(); // Inizia da 1, se vuoi che il primo ID sia 0 rimuovi questa riga.
+        _tokenIdCounter.increment(); // Start from 1, remove this line if you want the first ID to be 0.
 
-        // Inizializzazione delle città
+        // Initialization of cities
         cities.push(CityData("Berlin", "The cosmopolitan capital of Germany, rich in history and culture."));
         cities.push(CityData("Paris", "The city of love and fashion, with iconic landmarks and a romantic atmosphere."));
         cities.push(CityData("Rome", "The Eternal City, the cradle of Western civilization with ancient ruins and extraordinary art."));
@@ -121,17 +132,17 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
    
     function listForSale(uint256 tokenId, uint256 price) external {
         address owner = ownerOf(tokenId);
-        require(owner == msg.sender, "Non sei il proprietario");
-        require(price > 0, "Il prezzo deve essere maggiore di zero");
-        require(!isForSale[tokenId], "Gia in vendita");
+        require(owner == msg.sender, "You are not the owner");
+        require(price > 0, "Price must be greater than zero");
+        require(!isForSale[tokenId], "Already for sale");
 
-        // 1) Sposta fisicamente l'NFT dal venditore al contratto
+        // 1) Physically move the NFT from the seller to the contract
         _transfer(owner, address(this), tokenId);
 
-        // 2) Salva il venditore “reale” in mappatura
+        // 2) Save the "real" seller in the mapping
         sellers[tokenId] = owner;
 
-        // 3) Imposta lo stato “in vendita” e il prezzo
+        // 3) Set the "for sale" state and price
         isForSale[tokenId] = true;
         tokenPrices[tokenId] = price;
 
@@ -139,42 +150,40 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
     }
 
     function buyNFT(uint256 tokenId) external payable {
-        require(isForSale[tokenId], "Questo NFT non e' in vendita");
+        require(isForSale[tokenId], "This NFT is not for sale");
         uint256 price = tokenPrices[tokenId];
-        require(msg.value >= price, "Fondi insufficienti");
+        require(msg.value >= price, "Insufficient funds");
 
         address seller = sellers[tokenId];
-        require(seller != address(0), "Venditore non valido");
+        require(seller != address(0), "Invalid seller");
 
-        // 1) Togli lo stato “in vendita” per evitare rientri
+        // 1) Remove the "for sale" state to prevent re-entry
         isForSale[tokenId] = false;
         tokenPrices[tokenId] = 0;
         sellers[tokenId] = address(0);
 
-        // 2) Trasferisci l’NFT dal contratto al compratore
+        // 2) Transfer the NFT from the contract to the buyer
         _transfer(address(this), msg.sender, tokenId);
-         address buyer = msg.sender;
+        address buyer = msg.sender;
 
-
-        // 3) Invia i fondi al venditore originale
+        // 3) Send the funds to the original seller
         (bool sent, ) = payable(seller).call{ value: price }("");
-        require(sent, "Trasferimento fondi fallito");
+        require(sent, "Funds transfer failed");
 
-        // Se chi ha chiamato ha inviato più del prezzo, rimandiamo il resto
+        // If the caller sent more than the price, refund the excess
         if (msg.value > price) {
             uint256 diff = msg.value - price;
             (bool refundSent, ) = payable(msg.sender).call{ value: diff }("");
-            require(refundSent, "Rimborso fallito");
+            require(refundSent, "Refund failed");
         }
 
         emit NFTPurchased(tokenId, msg.sender, price);
 
         if (msg.value > price) {
-        uint256 diff = msg.value - price;
-        (bool refundSent, ) = payable(buyer).call{ value: diff }("");
-        require(refundSent, "Rimborso fallito");
-    }
-
+            uint256 diff = msg.value - price;
+            (bool refundSent, ) = payable(buyer).call{ value: diff }("");
+            require(refundSent, "Refund failed");
+        }
     }
 
     function totalMinted() public view returns (uint256) {
@@ -182,8 +191,8 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
     }
 
     function requestRandomNumber() public payable onlyOwner {
-        require(msg.value >= mintingCost, "Ether inviato insufficiente");
-        require(_tokenIdCounter.current() <= maxSupply, "Raggiunta la fornitura massima di NFT");
+        require(msg.value >= mintingCost, "Insufficient Ether sent");
+        require(_tokenIdCounter.current() <= maxSupply, "Maximum NFT supply reached");
 
         uint256 currentTokenId = _tokenIdCounter.current();
         _tokenIdCounter.increment();
@@ -191,7 +200,7 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
         _randomNumbers[currentTokenId] = UNSET;
 
         uint256 requestId;
-        // Chiamata standard per VRF v2.5 con la struct RandomWordsRequest
+        // Standard call for VRF v2.5 with the RandomWordsRequest struct
         try s_vrfCoordinator.requestRandomWords(
             VRFV2PlusClient.RandomWordsRequest({
                 keyHash: s_keyHash,
@@ -206,8 +215,8 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
         ) returns (uint256 rid) {
             requestId = rid;
         } catch Error(string memory reason) {
-            // Se la chiamata fallisce, revert con il messaggio d'errore.
-            // NON si deve tornare all'interfaccia vecchia/deprecata.
+            // If the call fails, revert with the error message.
+            // Do NOT fall back to the old/deprecated interface.
             revert(string(abi.encodePacked("Random number request failed: ", reason)));
         }
 
@@ -220,9 +229,9 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
 
 
     function fulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) internal override {
-        require(_requestIdToTokenId[requestId] > 0, "Richiesta non valida ");
-        require(!_requestIdFulfilled[requestId], "Richiesta eseguita");
-        require(randomWords.length > 0, "Nessun numero casuale ricevuto");
+        require(_requestIdToTokenId[requestId] > 0, "Invalid request");
+        require(!_requestIdFulfilled[requestId], "Request already fulfilled");
+        require(randomWords.length > 0, "No random number received");
 
         uint256 tokenId = _requestIdToTokenId[requestId];
         uint256 pick = randomWords[0] % cities.length;
@@ -243,46 +252,46 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
         _tokenCities[tokenId] = city;
 
         string memory json = string(abi.encodePacked(
-            '{"name":"', name,
-            '", "description":"', description,
-            '", "City":"', city,
-            '"}'
-        ));
+    '{"name":"', name,
+    '", "description":"', description,
+    '", "City":"', city,
+    '"}'
+));
 
         string memory base64 = Base64.encode(bytes(json));
         string memory tokenUri = string(abi.encodePacked("data:application/json;base64,", base64));
         _tokenURIs[tokenId] = tokenUri;
 
         emit RandomNumberFulfilled(tokenId, pick);
-        emit TokenMinted(tokenId); // Emetti questo evento solo dopo che tutti i metadati sono impostati.
+        emit TokenMinted(tokenId); // Emit this event only after all metadata is set.
     }
 
     function tokenURI (uint256 tokenId) public view override returns (string memory) {
-        if (_ownerOf(tokenId) == address(0)) { revert("Token non esistente"); }
-        require (_randomNumbers[tokenId] != UNSET, "Metadati non ancora generati");
+        if (_ownerOf(tokenId) == address(0)) { revert("Token does not exist"); }
+        require (_randomNumbers[tokenId] != UNSET, "Metadata not yet generated");
         return _tokenURIs[tokenId];
     }
 
     function getRandomResult(uint256 tokenId) external view returns (uint256) {
-        if (_ownerOf(tokenId) == address(0)) revert("Token non esistente");
+        if (_ownerOf(tokenId) == address(0)) revert("Token does not exist");
         uint256 rnd = _randomNumbers[tokenId];
         if (rnd == UNSET) {
-            return 0; // Se non è stato ancora generato il numero casuale, ritorna 0 (o un altro valore sentinella)
+            return 0; // If the random number hasn’t been generated yet, return 0 (or another sentinel value)
         }
         return rnd;
     }
 
     function getCityAndDescription(uint256 randomNumber) internal view returns (string memory city, string memory description) {
-        require(randomNumber < cities.length, "Numero casuale non valido");
+        require(randomNumber < cities.length, "Invalid random number");
         CityData memory data = cities[randomNumber];
         return (data.city, string(abi.encodePacked("A unique NFT representing the city of ", data.city, ". ", data.description)));
     }
 
     function getTokenMetadata(uint256 tokenId) public view returns (string memory name, string memory description, string memory city, string memory luckyNumber, string memory tourChance) {
         if (_ownerOf(tokenId) == address(0)) {
-            revert("Token non esistente");
+            revert("Token does not exist");
         }
-        require(_randomNumbers[tokenId] != UNSET, "Metadati non ancora generati");
+        require(_randomNumbers[tokenId] != UNSET, "Metadata not yet generated");
 
         name = _tokenNames[tokenId];
         description = _tokenDescriptions[tokenId];
@@ -291,15 +300,13 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
         tourChance = _tokenTourChances[tokenId];
     }
 
-    function startAuction(uint256 tokenId, uint256 durationInSeconds) external onlyOwner {
-        // Controlla che il token esista e che non ci sia già un'asta aperta
-        require(ownerOf(tokenId) == msg.sender, "Non sei il proprietario");
-        require(auctions[tokenId].endTime == 0, "Asta esistente");
+    function startAuction(uint256 tokenId, uint256 durationInSeconds) external {
+        require(ownerOf(tokenId) == msg.sender, "You are not the owner");
+        require(auctions[tokenId].endTime == 0, "Auction already exists");
 
-        // Trasferisci l’NFT in escrow al contratto
         _transfer(msg.sender, address(this), tokenId);
+        auctionSellers[tokenId] = msg.sender;
 
-        // Imposta i parametri dell’asta
         Auction storage auction = auctions[tokenId];
         auction.tokenId = tokenId;
         auction.endTime = block.timestamp + durationInSeconds;
@@ -310,14 +317,14 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
         emit AuctionStarted(tokenId, auction.endTime);
     }
 
-    /// @notice Effettua un’offerta per l’asta di un token
+    /// @notice Place a bid for the auction of a token
     function bid(uint256 tokenId) external payable {
         Auction storage auction = auctions[tokenId];
-        require(auction.endTime != 0, "Asta non esistente");
-        require(block.timestamp < auction.endTime, "Asta terminata");
-        require(msg.value > auction.highestBid, "Offerta troppo bassa");
+        require(auction.endTime != 0, "Auction does not exist");
+        require(block.timestamp < auction.endTime, "Auction has ended");
+        require(msg.value > auction.highestBid, "Bid too low");
 
-        // Se esiste già un highestBidder, accumula il rimborso
+        // If there is already a highest bidder, accumulate the refund
         if (auction.highestBidder != address(0)) {
             auction.bids[auction.highestBidder] += auction.highestBid;
         }
@@ -328,43 +335,63 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
         emit NewBid(tokenId, msg.sender, msg.value);
     }
 
-    /// @notice Conclude l’asta, trasferisce NFT al vincitore e invia l’Ether all’owner
-   function finalizeAuction(uint256 tokenId) external onlyOwner {
+   function finalizeAuction(uint256 tokenId) external {
+    // Retrieve the auction details from storage
     Auction storage a = auctions[tokenId];
+    uint256 endTime = a.endTime;
+    bool alreadyEnded = a.ended;
 
-    // 2) Copio in variabili locali (in “memory” / stack) i campi che mi servono
-    uint256 endTime       = a.endTime;
-    address highestBidder = a.highestBidder;
-    uint256 highestBid    = a.highestBid;
-    bool    alreadyEnded  = a.ended;
+    // --- Validation Checks ---
+    // Ensure the auction exists (endTime is not 0, meaning it was started)
+    require(endTime != 0, "Auction does not exist");
+    // Ensure the auction time has passed
+    require(block.timestamp >= endTime, "Auction not yet ended");
+    // Prevent multiple finalizations for the same auction
+    require(!alreadyEnded, "Auction already finalized");
 
-    // 3) Tutti i require su variabili locali
-    require(endTime != 0,                           "Asta non esistente");
-    require(msg.sender == owner() 
-         || msg.sender == highestBidder,            "Solo owner o vincitore");
-    require(block.timestamp >= endTime,              "Asta non ancora terminata");
-    require(!alreadyEnded,                           "Asta conclusa");
-
-    // 4) Unica scrittura in storage
+    // Mark the auction as ended within the contract's current state
+    // This `ended` flag is used in the `require(!alreadyEnded)` check above.
     a.ended = true;
 
-    // --- Ora uso le copie locali per fare trasferimenti ed eventi ---
-    if (highestBidder != address(0)) {
-        _transfer(address(this), highestBidder, tokenId);
-        payable(owner()).transfer(highestBid);
-        emit AuctionEnded(tokenId, highestBidder, highestBid);
+    // Get the original seller of the auction. This is critical before deleting `auctionSellers[tokenId]`.
+    address seller = auctionSellers[tokenId];
+
+    // --- Process Auction Outcome ---
+    if (a.highestBidder != address(0)) {
+        // If there's a highest bidder, transfer the NFT to them
+        _transfer(address(this), a.highestBidder, tokenId);
+        // Send the highest bid amount to the original seller
+        payable(seller).transfer(a.highestBid);
+        // Emit an event for the completed auction (with winner)
+        // NOTE: Make sure your `AuctionEnded` event in the contract also includes `originalSeller` and `auctionEndTime`
+        // e.g., `event AuctionEnded(uint256 indexed tokenId, address winner, uint256 amount, address indexed originalSeller, uint256 auctionEndTime);`
+        emit AuctionEnded(tokenId, a.highestBidder, a.highestBid, seller, endTime);
     } else {
-        _transfer(address(this), owner(), tokenId);
-        emit AuctionEnded(tokenId, address(0), 0);
+        // If there were no bids, transfer the NFT back to the original seller
+        _transfer(address(this), seller, tokenId);
+        // Emit an event for the completed auction (no winner)
+        emit AuctionEnded(tokenId, address(0), 0, seller, endTime);
     }
+
+    // --- Reset Auction State for Re-listing ---
+    // This is crucial for allowing the same NFT to be put up for auction again.
+    // `delete` resets all fields of the `Auction` struct for this `tokenId`
+    // to their default values (e.g., `endTime` becomes 0, `highestBidder` becomes address(0)).
+    // This makes the `require(auctions[tokenId].endTime == 0, "Auction already exists");` check
+    // in `startAuction` pass for future listings of this NFT.
+    delete auctions[tokenId];
+
+    // Also clear the original seller from the `auctionSellers` mapping.
+    // This prevents stale data and ensures a clean state for subsequent auctions.
+    auctionSellers[tokenId] = address(0);
 }
 
 
-    /// @notice Permette a chi ha fatto offerte perdenti di ritirare il rimborso
+    /// @notice Allow losing bidders to withdraw their refund
     function withdrawRefund(uint256 tokenId) external {
         Auction storage auction = auctions[tokenId];
         uint256 amount = auction.bids[msg.sender];
-        require(amount > 0, "Nessun rimborso disponibile");
+        require(amount > 0, "No refund available");
 
         auction.bids[msg.sender] = 0;
         payable(msg.sender).transfer(amount);
@@ -372,7 +399,7 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
         emit RefundWithdrawn(tokenId, msg.sender, amount);
     }
 
-    // Funzioni di utilità per la gestione delle stringhe JSON (le ho lasciate come le avevi)
+    // Utility functions for JSON string handling (left as they were)
     function _getStringValue(bytes memory jsonData, string memory key) internal pure returns (string memory) {
         bytes memory keyBytes = bytes(string(abi.encodePacked('"', key, '"')));
         uint256 start = find(jsonData, keyBytes);
@@ -428,16 +455,16 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
     }
 
     function substring(string memory str, uint256 start, uint256 len) internal pure returns (string memory) {
-        bytes memory b = bytes(str);
-        bytes memory temp = new bytes(len);
-        for (uint256 i = 0; i < len; i++) {
-            temp[i] = b[start + i];
-        }
-        return string(temp);
+    bytes memory bapter = bytes(str);
+    bytes memory temp = new bytes(len);
+    for (uint256 i = 0; i < len; i++) {
+        temp[i] = bapter[start + i]; // Usa `bapter` invece di `b`
     }
+    return string(temp);
+}
 
-    // Funzioni di proprietà (assumo tu abbia un contratto per onlyOwner o una logica simile)
-    // Se non hai onlyOwner, queste funzioni non saranno accessibili.
+    // Ownership functions (assuming you have an onlyOwner contract or similar logic)
+    // If you don’t have onlyOwner, these functions won’t be accessible.
     function setMintingCost(uint256 newCost) external onlyOwner {
         mintingCost = newCost;
     }
@@ -453,5 +480,4 @@ contract NFTcontract is ERC721Enumerable, VRFConsumerBaseV2Plus  {
     function getMaxSupply() public view returns (uint256) {
         return maxSupply;
     }
-
 }

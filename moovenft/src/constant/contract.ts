@@ -15,7 +15,7 @@ import florence from "../assets/images/florence.jpg";
 import rotterdam from "../assets/images/rotterdam.jpg";
 import naples from "../assets/images/naples.jpg";
 
-export const CONTRACT_ADDRESS = "0x34d73f46b7e25eeb0a4784b210d8cc998e0b1dda";
+export const CONTRACT_ADDRESS = "0x4c8dB92B71248d74768e6B032C9c2BBBd99f1864";
 
 export const CITY_IMAGES: { [key: string]: string } = {
   Berlin: berlin,

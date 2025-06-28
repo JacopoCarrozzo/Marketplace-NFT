@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ethers } from 'ethers';
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from '../constant/contract';
 import { CITY_IMAGES } from '../constant/contract';
-import { Link, useNavigate } from 'react-router-dom'; // Importa useNavigate
+import { Link, useNavigate } from 'react-router-dom'; // Import useNavigate
 
 interface Purchase {
     tokenId: string;
@@ -17,12 +17,12 @@ const PurchaseHistory = ({ currentAccount }: { currentAccount: string | null }) 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    const navigate = useNavigate(); // Inizializza useNavigate
+    const navigate = useNavigate(); // Initialize useNavigate
 
     useEffect(() => {
         const fetchPurchaseHistory = async () => {
             if (!currentAccount) {
-                setError("Connetti il tuo wallet per vedere lo storico acquisti.");
+                setError("Connect your wallet to view your purchase history."); // Translated
                 setLoading(false);
                 return;
             }
@@ -35,12 +35,16 @@ const PurchaseHistory = ({ currentAccount }: { currentAccount: string | null }) 
                 if (window.ethereum) {
                     provider = new ethers.BrowserProvider(window.ethereum);
                 } else {
-                    provider = new ethers.JsonRpcProvider('https://rpc.sepolia.org');
+                    // This RPC URL should ideally come from your .env or a config file
+                    // Consistent with useWallet hook's PUBLIC_RPC_URL
+                    provider = new ethers.JsonRpcProvider('https://eth-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY'); // Use your actual Alchemy key or PUBLIC_RPC_URL
                 }
 
                 const network = await provider.getNetwork();
-                if (network.chainId !== BigInt(11155111)) {
-                    setError("Collegati alla rete Sepolia.");
+                // Ensure correctChainId is imported or defined
+                const DESIRED_CHAIN_ID = 11155111; // Example for Sepolia
+                if (network.chainId !== BigInt(DESIRED_CHAIN_ID)) {
+                    setError("Please connect to the Sepolia network."); // Translated
                     setLoading(false);
                     return;
                 }
@@ -48,7 +52,7 @@ const PurchaseHistory = ({ currentAccount }: { currentAccount: string | null }) 
                 const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
 
                 const currentBlock = await provider.getBlockNumber();
-                const fromBlock = Math.max(0, currentBlock - 50000);
+                const fromBlock = Math.max(0, currentBlock - 50000); // Look back 50,000 blocks
 
                 const filter = contract.filters.NFTPurchased(null, currentAccount);
                 const logs = await contract.queryFilter(filter, fromBlock, "latest");
@@ -68,7 +72,7 @@ const PurchaseHistory = ({ currentAccount }: { currentAccount: string | null }) 
                                 nftCity = metadata.city;
                             }
                         } catch (metaError) {
-                            console.warn(`Errore nel recuperare metadati per tokenId ${tokenId}:`, metaError);
+                            console.warn(`Error fetching metadata for tokenId ${tokenId}:`, metaError); // Translated
                         }
 
                         userPurchases.push({
@@ -83,43 +87,46 @@ const PurchaseHistory = ({ currentAccount }: { currentAccount: string | null }) 
 
                 setPurchases(userPurchases.reverse());
             } catch (err) {
-                console.error("Errore nel recupero degli eventi:", err);
-                setError("Errore durante il recupero dello storico. Assicurati di essere connesso alla rete Sepolia.");
+                console.error("Error fetching events:", err); // Translated
+                setError("Error retrieving history. Please ensure you are connected to the Sepolia network."); // Translated
             } finally {
                 setLoading(false);
             }
         };
 
         fetchPurchaseHistory();
-    }, [currentAccount]);
+    }, [currentAccount]); // Dependency on currentAccount
 
-    // Funzione per tornare alla home
+    // Function to go back to Home
     const handleGoHome = () => {
-        navigate('/'); // Naviga alla root (Home)
+        navigate('/'); // Navigate to root (Home)
     };
 
-    if (loading) {
-        return (
-            <div className="text-center p-5">
-                <div className="animate-spin border-4 border-gray-200 border-t-blue-500 rounded-full w-10 h-10 mx-auto"></div>
-                <p className="text-gray-700 mt-2">Caricamento storico acquisti...</p>
-            </div>
-        );
-    }
-
-    if (error) {
-        return (
-            <div className="bg-red-100 text-red-800 p-4 rounded-lg m-5 text-center">
-                {error}
-            </div>
-        );
-    }
-
     return (
-        <div className="max-w-screen-xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-            <h2 className="text-3xl font-bold text-center mb-8 text-white-800">Storico Acquisti NFT</h2>
-            {purchases.length === 0 ? (
-                <p className="text-center text-gray-600 text-lg">Nessun acquisto trovato per questo account.</p>
+        <div className="max-w-screen-xl mx-auto px-4 sm:px-6 lg:px-8 py-12 pt-8"> {/* Added pt-8 for consistent top spacing */}
+            <h2 className="text-3xl font-bold text-center mb-8 text-white">Purchase History</h2> {/* Translated title */}
+
+            {/* Loading Spinner */}
+            {loading ? (
+                <div className="flex flex-col items-center justify-center py-8">
+                    <div
+                        className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"
+                        role="status"
+                    >
+                        <span className="sr-only">Loading...</span>
+                    </div>
+                    <p className="text-center text-gray-400 mt-4">Loading purchase history...</p>
+                </div>
+            ) : error ? (
+                <div className="bg-red-100 text-red-800 p-4 rounded-lg m-5 text-center">
+                    {error}
+                </div>
+            ) : !currentAccount ? ( // Explicitly handle no account connected
+                 <p className="text-center text-white text-lg">
+                    Connect your wallet to view your NFTs. {/* Re-used MyNFTs message */}
+                 </p>
+            ) : purchases.length === 0 ? (
+                <p className="text-center text-gray-600 text-lg">No purchases found for this account.</p> 
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                     {purchases.map((purchase) => (
@@ -134,23 +141,23 @@ const PurchaseHistory = ({ currentAccount }: { currentAccount: string | null }) 
                                 <div className="h-32 w-full overflow-hidden rounded mt-2">
                                     <img
                                         src={CITY_IMAGES[purchase.city || 'DefaultCity']}
-                                        alt={purchase.city || 'Città sconosciuta'}
+                                        alt={purchase.city || 'Unknown City'} 
                                         className="object-cover h-full w-full"
                                         loading="lazy"
                                     />
                                 </div>
                                 <p className="text-gray-600 mt-2 text-sm">
-                                    Città: {purchase.city || "N/A"}
+                                    City: {purchase.city || "N/A"}
                                 </p>
-                                
+                                <p className="text-gray-800 font-bold mt-2">Price: {purchase.price} ETH</p> {/* Added Price display */}
                             </div>
                             <div className="p-4 border-t">
-                                {/* BOTTONE "TORNA ALLA HOME" */}
+                                {/* "Back to Home" button */}
                                 <button
-                                    onClick={handleGoHome} // Chiama la funzione di navigazione
-                                    className="block text-center bg-green-600 text-white py-2 rounded hover:bg-green-700 transition text-sm w-full" // Stile per un bottone "successo" e larghezza piena
+                                    onClick={handleGoHome} // Call navigation function
+                                    className="block text-center bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition text-sm w-full" // Changed color to blue, consistent with Home buy buttons
                                 >
-                                    Torna alla Home
+                                    Back to Home 
                                 </button>
                             </div>
                         </div>

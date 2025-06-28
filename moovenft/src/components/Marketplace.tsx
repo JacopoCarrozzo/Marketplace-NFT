@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react"; // Added useCallback
 import { useMarketNFTs, NFTItem } from "../hooks/useMarketNFTs";
 import { ethers } from "ethers";
 import { CONTRACT_ADDRESS, CONTRACT_ABI, CITY_IMAGES } from "../constant/contract";
@@ -23,6 +23,18 @@ const MarketPlace: React.FC<MarketPlaceProps> = ({
   const [selectedNFT, setSelectedNFT] = useState<NFTItem | null>(null);
   const [isBuying, setIsBuying] = useState(false); // Track purchase loading state
   const [successMessage, setSuccessMessage] = useState<string | null>(null); // Track success notification
+
+  // New state for user messages (similar to Home.tsx)
+  const [userMessage, setUserMessage] = useState<string | null>(null);
+
+  // Function to show a temporary message (similar to Home.tsx)
+  const showUserMessage = useCallback((message: string, duration = 3000) => {
+    setUserMessage(message);
+    const timer = setTimeout(() => {
+      setUserMessage(null);
+    }, duration);
+    return () => clearTimeout(timer); // Cleanup function for useEffect
+  }, []);
 
   // Expose fetchNFTs to parent
   useEffect(() => {
@@ -56,7 +68,8 @@ const MarketPlace: React.FC<MarketPlaceProps> = ({
 
   const handleBuyNFT = async (nft: NFTItem) => {
     if (!signer || !walletAddress) {
-      alert("You must connect your wallet to purchase an NFT.");
+      // Changed from alert() to showUserMessage()
+      showUserMessage("You must connect your wallet to purchase an NFT.", 4000);
       return;
     }
 
@@ -68,23 +81,27 @@ const MarketPlace: React.FC<MarketPlaceProps> = ({
       console.log("Buy NFT Check:", { owner, walletAddress, tokenId }); // Debug log
 
       if (owner.toLowerCase() === walletAddress.toLowerCase()) {
-        alert("You cannot buy your own NFT!");
+        // Changed from alert() to showUserMessage()
+        showUserMessage("You cannot buy your own NFT!", 4000);
         return;
       }
       if (!forSale) {
-        alert("This NFT is no longer for sale.");
+        // Changed from alert() to showUserMessage()
+        showUserMessage("This NFT is no longer for sale.", 4000);
         return;
       }
 
       const priceInWei = ethers.parseEther(nft.price);
       if (priceInWei < onChainPrice) {
-        alert("The price has changed. Please refresh the page and try again.");
+        // Changed from alert() to showUserMessage()
+        showUserMessage("The price has changed. Please refresh the page and try again.", 4000);
         return;
       }
 
       const balance: bigint = await signer.provider!.getBalance(walletAddress);
       if (balance < onChainPrice) {
-        alert("Insufficient balance.");
+        // Changed from alert() to showUserMessage()
+        showUserMessage("Insufficient balance.", 4000);
         return;
       }
 
@@ -98,7 +115,8 @@ const MarketPlace: React.FC<MarketPlaceProps> = ({
       setSelectedNFT(null); // Close Info view
     } catch (e: any) {
       console.error("Error during purchase:", e);
-      alert("Error during purchase. Please try again later.");
+      // Changed from alert() to showUserMessage()
+      showUserMessage("Error during purchase. Please try again later.", 4000);
     } finally {
       setIsBuying(false);
     }
@@ -108,7 +126,14 @@ const MarketPlace: React.FC<MarketPlaceProps> = ({
     <div className="max-w-full mx-auto px-6 py-12">
       <h2 className="text-3xl font-bold text-center mb-8 text-white">NFTs for Sale</h2>
 
-      {/* Success notification */}
+      {/* User message component (similar to Home.tsx) */}
+      {userMessage && (
+        <div className="fixed top-20 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in-out">
+          <p className="text-lg font-semibold">{userMessage}</p>
+        </div>
+      )}
+
+      {/* Success notification - kept as is for now, could be integrated with userMessage */}
       {successMessage && (
         <div className="fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center">
           <svg className="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -118,61 +143,64 @@ const MarketPlace: React.FC<MarketPlaceProps> = ({
         </div>
       )}
 
-      {loading && (
-        <div className="text-center text-white text-lg flex items-center justify-center">
-          <svg className="animate-spin h-5 w-5 mr-2" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-          </svg>
-          Loading NFTs...
+      {loading ? ( // Modified loading state display
+        <div className="flex flex-col items-center justify-center py-8">
+          <div
+            className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"
+            role="status"
+          >
+            <span className="sr-only">Loading...</span>
+          </div>
+          <p className="text-center text-gray-400 mt-4">Loading NFTs...</p>
         </div>
-      )}
-      {error && <p className="text-center text-red-500">Error: Failed to load NFTs. Please try again later.</p>}
-      {!loading && !error && nfts.length === 0 && (
+      ) : error ? ( // Error display
+        <p className="text-center text-red-500">Error: Failed to load NFTs. Please try again later.</p>
+      ) : nfts.filter(nft => nft.isForSale).length === 0 ? ( // No NFTs display
         <p className="text-center text-white">No NFTs for sale at the moment.</p>
-      )}
-
-      {!selectedNFT && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
-          {nfts
-            .filter((nft) => nft.isForSale)
-            .map((nft) => (
-              <div key={nft.tokenId} className="bg-white shadow-lg rounded-lg flex flex-col transform transition duration-200 hover:scale-105">
-                <div className="p-4 flex-1">
-                  <h3 className="text-lg font-semibold text-gray-800">
-                    {nft.name} {/* e.g. "City NFT #6" */}
-                  </h3>
-                  <div className="h-32 w-full overflow-hidden rounded bg-gray-200">
-                    <img
-                      src={CITY_IMAGES[nft.city] || "/images/default.jpg"}
-                      alt={nft.city}
-                      className="object-cover h-full w-full"
-                    />
+      ) : ( // NFTs list display
+        !selectedNFT && ( // Only show grid if no NFT is selected
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
+            {nfts
+              .filter((nft) => nft.isForSale)
+              .map((nft) => (
+                <div key={nft.tokenId} className="bg-white shadow-lg rounded-lg flex flex-col transform transition duration-200 hover:scale-105">
+                  <div className="p-4 flex-1">
+                    <h3 className="text-lg font-semibold text-gray-800">
+                      {nft.name} {/* e.g. "City NFT #6" */}
+                    </h3>
+                    <div className="h-32 w-full overflow-hidden rounded bg-gray-200">
+                      <img
+                        src={CITY_IMAGES[nft.city] || "/images/default.jpg"}
+                        alt={nft.city}
+                        className="object-cover h-full w-full"
+                        loading="lazy"
+                      />
+                    </div>
+                    <p className="text-sm text-gray-600 mt-2">
+                      City: {nft.city}
+                    </p>
+                    <p className="text-gray-800 font-bold mt-2">Price: {nft.price} ETH</p>
                   </div>
-                  <p className="text-sm text-gray-600 mt-2">
-                    City: {nft.city}
-                  </p>
-                  <p className="text-gray-800 font-bold mt-2">Price: {nft.price} ETH</p>
+                  <div className="p-4 border-t flex space-x-4">
+                    <button
+                      onClick={() => handleBuyNFT(nft)}
+                      className={`flex-1 bg-blue-600 text-white py-2 rounded hover:bg-blue-500 ${isBuying ? "opacity-50 cursor-not-allowed" : ""}`}
+                      disabled={isBuying}
+                    >
+                      {isBuying ? "Buying..." : "Buy"}
+                    </button>
+                    <button
+                      onClick={() => setSelectedNFT(nft)}
+                      className="flex-1 bg-gray-200 text-gray-800 py-2 rounded hover:bg-gray-300"
+                      disabled={isBuying}
+                    >
+                      Show Info
+                    </button>
+                  </div>
                 </div>
-                <div className="p-4 border-t flex space-x-4">
-                  <button
-                    onClick={() => handleBuyNFT(nft)}
-                    className={`flex-1 bg-blue-600 text-white py-2 rounded hover:bg-blue-500 ${isBuying ? "opacity-50 cursor-not-allowed" : ""}`}
-                    disabled={isBuying}
-                  >
-                    {isBuying ? "Buying..." : "Buy"}
-                  </button>
-                  <button
-                    onClick={() => setSelectedNFT(nft)}
-                    className="flex-1 bg-gray-200 text-gray-800 py-2 rounded hover:bg-gray-300"
-                    disabled={isBuying}
-                  >
-                    Show Info
-                  </button>
-                </div>
-              </div>
-            ))}
-        </div>
+              ))}
+          </div>
+        )
       )}
 
       {selectedNFT && (

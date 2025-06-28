@@ -79,21 +79,13 @@ const Info: React.FC<InfoProps> = ({
         <p className="text-lg mb-2"><strong>City:</strong> {capitalizeFirstLetter(nft.city)}</p>
         <p className="text-lg mb-4">{nft.description}</p>
         {/* Show price or reason why not available */}
-        {isForSale && nft.price && nft.price !== "0.0" ? (
-          <p className="text-lg mb-2"><strong>Price:</strong> {nft.price} ETH</p>
-        ) : (
-          <p className="text-lg mb-2 text-red-500">
-            {isOwnedByUser
-              ? "You own this NFT."
-              : "This NFT is not available for direct purchase."}
-          </p>
-        )}
+        
       </div>
 
       {/* Action buttons (below the text) */}
       <div className="w-full flex flex-col md:flex-row justify-center space-y-4 md:space-y-0 md:space-x-4 mt-8">
         <button
-          className="w-full md:w-auto bg-gray-500 text-white font-semibold py-3 px-6 rounded-lg hover:bg-gray-700 transition duration-300 text-lg"
+          className="w-full md:w-auto bg-blue-500 text-white font-semibold py-3 px-6 rounded-lg hover:bg-blue-700 transition duration-300 text-lg"
           onClick={() => setSelectedNFT(null)}
           disabled={isBuying}
         >

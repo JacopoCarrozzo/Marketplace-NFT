@@ -1,3 +1,4 @@
+// ../hooks/useWallet.ts
 import { useEffect, useState, useCallback } from "react";
 import { ethers } from "ethers";
 
@@ -7,6 +8,9 @@ declare global {
   }
 }
 
+const PUBLIC_RPC_URL = "https://eth-sepolia.g.alchemy.com/v2/ZYdwG1CvIv81Z6nEajE5o";
+
+
 export const useWallet = (desiredChainId: number) => {
   const [walletConnected, setWalletConnected] = useState(false);
   const [balanceInfo, setBalanceInfo] = useState({
@@ -15,39 +19,66 @@ export const useWallet = (desiredChainId: number) => {
   });
   const [correctChain, setCorrectChain] = useState(false);
 
-  const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
+  // Il provider può essere BrowserProvider (per wallet connesso) o JsonRpcProvider (per letture pubbliche)
+  const [provider, setProvider] = useState<ethers.BrowserProvider | ethers.JsonRpcProvider | null>(null);
   const [signer, setSigner] = useState<ethers.Signer | null>(null);
 
+  // Inizializza un JsonRpcProvider una volta al mount dell'hook.
+  // Questo sarà il provider di fallback per le letture.
+  const [publicRpcProvider, setPublicRpcProvider] = useState<ethers.JsonRpcProvider | null>(null);
+
+  useEffect(() => {
+    try {
+      if (!PUBLIC_RPC_URL) {
+        console.error("PUBLIC_RPC_URL non definito. Assicurati che la variabile d'ambiente sia caricata correttamente.");
+        setPublicRpcProvider(null);
+        setProvider(null);
+        return;
+      }
+      const rpc = new ethers.JsonRpcProvider(PUBLIC_RPC_URL);
+      setPublicRpcProvider(rpc);
+      // Imposta il provider iniziale a quello pubblico. Sarà sovrascritto se un wallet si connette.
+      setProvider(rpc);
+    } catch (error) {
+      console.error("Errore nell'inizializzazione del public RPC provider:", error);
+      setPublicRpcProvider(null); // Assicurati che sia null in caso di fallimento
+      setProvider(null); // Nessun provider se l'RPC pubblico fallisce
+    }
+  }, []); // Esegui solo al mount del componente
+
   // --- Funzione per ottenere/aggiornare tutte le informazioni del wallet ---
-  // Memoizzata per evitare ricreazioni inutili.
   const updateWalletInfo = useCallback(async () => {
     if (!window.ethereum) {
-      // Se MetaMask non è installato, resetta tutto
+      // Se MetaMask non è installato, resetta tutto e usa il provider pubblico
       setWalletConnected(false);
       setBalanceInfo({ address: null, ethBalance: null });
       setCorrectChain(false);
-      setProvider(null);
       setSigner(null);
+      // Mantieni il publicRpcProvider per le letture del marketplace
+      if (publicRpcProvider) {
+        setProvider(publicRpcProvider);
+      } else {
+        setProvider(null); // Se anche il publicRpcProvider non è disponibile
+      }
       return;
     }
 
     try {
-      const currentProvider = new ethers.BrowserProvider(window.ethereum);
-      // Imposta il provider non appena lo crei. Questo assicura che sia disponibile
-      // per operazioni di sola lettura anche se non c'è un signer attivo.
-      setProvider(currentProvider); 
+      const currentBrowserProvider = new ethers.BrowserProvider(window.ethereum);
 
-      const accounts = await currentProvider.listAccounts(); // Ottieni gli account connessi
+      const accounts = await currentBrowserProvider.listAccounts(); // Ottieni gli account connessi
       const currentAddress = accounts.length > 0 ? accounts[0].address : null;
 
       if (currentAddress) {
-        const currentSigner = await currentProvider.getSigner(currentAddress);
+        // Se c'è un account connesso, usiamo il BrowserProvider e il suo signer
+        const currentSigner = await currentBrowserProvider.getSigner(currentAddress);
         setSigner(currentSigner);
+        setProvider(currentBrowserProvider); // Imposta il BrowserProvider
 
-        const network = await currentProvider.getNetwork();
+        const network = await currentBrowserProvider.getNetwork();
         const currentChainId = Number(network.chainId); // ChainId è BigInt in Ethers v6
 
-        const balanceWei = await currentProvider.getBalance(currentAddress);
+        const balanceWei = await currentBrowserProvider.getBalance(currentAddress);
         const ethBalance = ethers.formatEther(balanceWei);
 
         setWalletConnected(true);
@@ -58,21 +89,28 @@ export const useWallet = (desiredChainId: number) => {
         setWalletConnected(false);
         setBalanceInfo({ address: null, ethBalance: null });
         setSigner(null); // Nessun signer se non c'è un account connesso
-        // Il provider potrebbe rimanere se si volesse fare solo operazioni di lettura
-        // ma per consistenza con lo stato "non connesso", lo resettiamo.
-        setProvider(null); 
         setCorrectChain(false); // La chain non è "corretta" se non c'è un wallet connesso
+        // Fallback al provider pubblico per le letture del marketplace
+        if (publicRpcProvider) {
+          setProvider(publicRpcProvider);
+        } else {
+          setProvider(null); // Nessun provider se publicRpcProvider non è disponibile
+        }
       }
     } catch (error) {
       console.error("Errore nell'aggiornamento delle info del wallet:", error);
-      // In caso di errore, resetta tutti gli stati
+      // In caso di errore, resetta tutti gli stati e usa il provider pubblico
       setWalletConnected(false);
       setBalanceInfo({ address: null, ethBalance: null });
       setCorrectChain(false);
-      setProvider(null);
       setSigner(null);
+      if (publicRpcProvider) {
+        setProvider(publicRpcProvider);
+      } else {
+        setProvider(null);
+      }
     }
-  }, [desiredChainId]); // Dipende solo da desiredChainId
+  }, [desiredChainId, publicRpcProvider]); // Dipende anche da publicRpcProvider
 
   // --- Funzione per connettere il wallet (richiede permesso all'utente) ---
   const connectWallet = useCallback(async () => {
@@ -89,8 +127,14 @@ export const useWallet = (desiredChainId: number) => {
       alert("Errore durante la connessione al wallet: " + (error.message || error.reason || "Errore sconosciuto."));
       setWalletConnected(false);
       localStorage.removeItem("walletConnected");
+      // In caso di fallimento della connessione, assicurati di usare il public provider
+      if (publicRpcProvider) {
+        setProvider(publicRpcProvider);
+      } else {
+        setProvider(null);
+      }
     }
-  }, [updateWalletInfo]); // Dipende solo da updateWalletInfo
+  }, [updateWalletInfo, publicRpcProvider]); // Dipende anche da publicRpcProvider
 
   // --- Funzione per tentare lo switch o l'aggiunta della chain ---
   const switchChain = useCallback(async () => {
@@ -104,19 +148,16 @@ export const useWallet = (desiredChainId: number) => {
       return true; // Lo switch ha avuto successo
     } catch (switchError: any) {
       if (switchError.code === 4902) { // Rete sconosciuta, prova ad aggiungerla
-        // Qui dovresti avere la configurazione completa per tutte le catene supportate.
-        // Ho lasciato solo Sepolia come esempio.
         let networkConfig: any;
         if (desiredChainId === 11155111) { // Sepolia
           networkConfig = {
             chainId: `0x${desiredChainId.toString(16)}`,
             chainName: "Sepolia Test Network",
-            rpcUrls: ["https://sepolia.infura.io/v3/YOUR_INFURA_PROJECT_ID"], // Assicurati di usare il tuo ID Infura
+            rpcUrls: [PUBLIC_RPC_URL], // Usa l'URL da .env
             nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
             blockExplorerUrls: ["https://sepolia.etherscan.io"],
           };
         }
-        // Puoi aggiungere qui altri casi per altre reti se necessario (es. Mainnet, Polygon, BSC)
 
         if (networkConfig) {
           try {
@@ -139,56 +180,68 @@ export const useWallet = (desiredChainId: number) => {
         return false;
       }
     }
-  }, [desiredChainId, updateWalletInfo]); // Dipende anche da updateWalletInfo
+  }, [desiredChainId, updateWalletInfo]);
 
-    const disconnectWallet = useCallback(() => {
-  // 1) Puliamo lo stato
-  setWalletConnected(false);
-  setBalanceInfo({ address: null, ethBalance: null });
-  setCorrectChain(false);
-  setProvider(null);
-  setSigner(null);
-  localStorage.removeItem("walletConnected");
+  const disconnectWallet = useCallback(() => {
+    // 1) Puliamo lo stato
+    setWalletConnected(false);
+    setBalanceInfo({ address: null, ethBalance: null });
+    setCorrectChain(false);
+    setSigner(null);
+    localStorage.removeItem("walletConnected");
 
-  // 2) Ricarichiamo la pagina per "resettare" React/MetaMask
-  window.location.reload();
-}, []);
+    // 2) Imposta il provider al provider pubblico per consentire le letture continue
+    if (publicRpcProvider) {
+      setProvider(publicRpcProvider);
+    } else {
+      setProvider(null); // Se non c'è nemmeno il provider pubblico
+    }
 
+    // `window.location.reload();` è stato rimosso per un comportamento meno aggressivo.
+  }, [publicRpcProvider]);
 
 
   useEffect(() => {
-  const initWalletOnLoad = async () => {
-    if (window.ethereum) {
-      const userPreviouslyConnected = localStorage.getItem("walletConnected") === "true";
-      if (userPreviouslyConnected) {
-        await updateWalletInfo(); // 🔁 Connetti solo se l'utente ha dato consenso in precedenza
+    const initWalletOnLoad = async () => {
+      // Se il publicRpcProvider non è ancora inizializzato, attendi
+      if (!publicRpcProvider) return;
+
+      if (window.ethereum) {
+        const userPreviouslyConnected = localStorage.getItem("walletConnected") === "true";
+        if (userPreviouslyConnected) {
+          await updateWalletInfo(); // Connetti solo se l'utente ha dato consenso in precedenza
+        } else {
+          // Se non c'è una connessione precedente, usa il publicRpcProvider per le letture iniziali
+          setProvider(publicRpcProvider);
+        }
+      } else {
+        // Se MetaMask non è disponibile, assicurati che il provider sia il publicRpcProvider
+        setProvider(publicRpcProvider);
       }
-    }
-  };
-
-  initWalletOnLoad();
-
-  const handleAccountsChanged = (accounts: string[]) => {
-    console.log("Accounts changed:", accounts);
-    updateWalletInfo();
-  };
-
-  const handleChainChanged = async (chainId: string) => {
-    console.log("Chain changed:", parseInt(chainId, 16));
-    await updateWalletInfo();
-  };
-
-  if (window.ethereum) {
-    window.ethereum.on("accountsChanged", handleAccountsChanged);
-    window.ethereum.on("chainChanged", handleChainChanged);
-
-    return () => {
-      window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
-      window.ethereum.removeListener("chainChanged", handleChainChanged);
     };
-  }
-}, [updateWalletInfo]);
 
+    initWalletOnLoad();
+
+    const handleAccountsChanged = (accounts: string[]) => {
+      console.log("Accounts changed:", accounts);
+      updateWalletInfo();
+    };
+
+    const handleChainChanged = async (chainId: string) => {
+      console.log("Chain changed:", parseInt(chainId, 16));
+      await updateWalletInfo();
+    };
+
+    if (window.ethereum) {
+      window.ethereum.on("accountsChanged", handleAccountsChanged);
+      window.ethereum.on("chainChanged", handleChainChanged);
+
+      return () => {
+        window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
+        window.ethereum.removeListener("chainChanged", handleChainChanged);
+      };
+    }
+  }, [updateWalletInfo, publicRpcProvider]); // Aggiungi publicRpcProvider alle dipendenze
 
   return {
     walletConnected,
@@ -198,7 +251,7 @@ export const useWallet = (desiredChainId: number) => {
     },
     connectWallet,
     correctChain,
-    provider, // Espongo il provider
+    provider, // Espongo il provider (ora può essere BrowserProvider o JsonRpcProvider)
     signer,   // Espongo il signer
     switchChain,
     disconnectWallet,
