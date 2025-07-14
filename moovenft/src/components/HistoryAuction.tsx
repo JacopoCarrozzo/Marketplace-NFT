@@ -215,8 +215,7 @@ const HistoryAuction: React.FC = () => {
                   </div>
                   <div className="text-xs text-gray-500 space-y-1">
                      <p>{auction.status === 'Finalized' ? 'Winner: ' : 'Highest Bidder: '}<span className="font-mono">{abbreviateAddress(auction.highestBidder)}</span></p>
-                     <p>Seller: <span className="font-mono">{abbreviateAddress(auction.seller)}</span></p>
-                     <p>Ends: {new Date(auction.auctionEndTime * 1000).toLocaleString()}</p>
+                     
                   </div>
                   <div className="mt-auto pt-4">{renderCardActions(auction)}</div>
                 </div>

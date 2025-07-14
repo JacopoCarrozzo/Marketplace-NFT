@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ethers } from 'ethers';
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from '../constant/contract';
 import { CITY_IMAGES } from '../constant/contract';
-import { Link, useNavigate } from 'react-router-dom'; // Import useNavigate
+import { Link, useNavigate } from 'react-router-dom'; 
 
 interface Purchase {
     tokenId: string;
@@ -17,12 +17,12 @@ const PurchaseHistory = ({ currentAccount }: { currentAccount: string | null }) 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    const navigate = useNavigate(); // Initialize useNavigate
+    const navigate = useNavigate(); 
 
     useEffect(() => {
         const fetchPurchaseHistory = async () => {
             if (!currentAccount) {
-                setError("Connect your wallet to view your purchase history."); // Translated
+                setError("Connect your wallet to view your purchase history."); 
                 setLoading(false);
                 return;
             }
@@ -35,16 +35,13 @@ const PurchaseHistory = ({ currentAccount }: { currentAccount: string | null }) 
                 if (window.ethereum) {
                     provider = new ethers.BrowserProvider(window.ethereum);
                 } else {
-                    // This RPC URL should ideally come from your .env or a config file
-                    // Consistent with useWallet hook's PUBLIC_RPC_URL
-                    provider = new ethers.JsonRpcProvider('https://eth-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY'); // Use your actual Alchemy key or PUBLIC_RPC_URL
+                    provider = new ethers.JsonRpcProvider('https://eth-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY'); 
                 }
 
                 const network = await provider.getNetwork();
-                // Ensure correctChainId is imported or defined
-                const DESIRED_CHAIN_ID = 11155111; // Example for Sepolia
+                const DESIRED_CHAIN_ID = 11155111; 
                 if (network.chainId !== BigInt(DESIRED_CHAIN_ID)) {
-                    setError("Please connect to the Sepolia network."); // Translated
+                    setError("Please connect to the Sepolia network."); 
                     setLoading(false);
                     return;
                 }
@@ -52,7 +49,7 @@ const PurchaseHistory = ({ currentAccount }: { currentAccount: string | null }) 
                 const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
 
                 const currentBlock = await provider.getBlockNumber();
-                const fromBlock = Math.max(0, currentBlock - 50000); // Look back 50,000 blocks
+                const fromBlock = Math.max(0, currentBlock - 50000); 
 
                 const filter = contract.filters.NFTPurchased(null, currentAccount);
                 const logs = await contract.queryFilter(filter, fromBlock, "latest");
@@ -72,7 +69,7 @@ const PurchaseHistory = ({ currentAccount }: { currentAccount: string | null }) 
                                 nftCity = metadata.city;
                             }
                         } catch (metaError) {
-                            console.warn(`Error fetching metadata for tokenId ${tokenId}:`, metaError); // Translated
+                            console.warn(`Error fetching metadata for tokenId ${tokenId}:`, metaError); 
                         }
 
                         userPurchases.push({
@@ -87,8 +84,8 @@ const PurchaseHistory = ({ currentAccount }: { currentAccount: string | null }) 
 
                 setPurchases(userPurchases.reverse());
             } catch (err) {
-                console.error("Error fetching events:", err); // Translated
-                setError("Error retrieving history. Please ensure you are connected to the Sepolia network."); // Translated
+                console.error("Error fetching events:", err); 
+                setError("Error retrieving history. Please ensure you are connected to the Sepolia network."); 
             } finally {
                 setLoading(false);
             }

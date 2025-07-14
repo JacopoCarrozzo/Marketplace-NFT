@@ -79,7 +79,6 @@ const Info: React.FC<InfoProps> = ({
         <p className="text-lg mb-2"><strong>City:</strong> {capitalizeFirstLetter(nft.city)}</p>
         <p className="text-lg mb-4">{nft.description}</p>
         {/* Show price or reason why not available */}
-        
       </div>
 
       {/* Action buttons (below the text) */}
@@ -96,7 +95,7 @@ const Info: React.FC<InfoProps> = ({
         {isForSale && onBookClick && !isOwnedByUser && (
           <button
             className={`w-full md:w-auto bg-green-500 text-white font-semibold py-3 px-6 rounded-lg transition duration-300 text-lg ${
-              isBuying ? "opacity-50 cursor-not-allowed" : "hover:bg-green-700"
+              isBuying ? '' : 'hover:bg-green-700'
             }`}
             onClick={() => {
               const priceNum = Number(nft.price);
@@ -106,10 +105,7 @@ const Info: React.FC<InfoProps> = ({
           >
             {isBuying ? (
               <span className="flex items-center justify-center">
-                <svg className="animate-spin h-5 w-5 mr-2" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                </svg>
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
                 Buying...
               </span>
             ) : (

@@ -42,6 +42,7 @@ const AuctionPlace: React.FC<AuctionPlaceProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [bidAmounts, setBidAmounts] = useState<{ [key: number]: string }>({});
   const [bidErrors, setBidErrors] = useState<{ [key: number]: string | null }>({});
+  const [placingBidTokenId, setPlacingBidTokenId] = useState<number | null>(null);
 
   const fetchAuctions = async () => {
     if (!provider) return;
@@ -108,22 +109,21 @@ const AuctionPlace: React.FC<AuctionPlaceProps> = ({
       setAuctions(lista);
     } catch (e: any) {
       console.error("Error in fetchAuctions:", e);
-      setError("Failed to load auctions. Please try again later."); // Translated error message
+      setError("Failed to load auctions. Please try again later.");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    // Only fetch auctions if provider is available
-    if (provider) { // Removed signer, walletConnected, correctChain from here for initial display logic
+    if (provider) {
       fetchAuctions();
     }
-  }, [provider]); // Only fetch when provider is ready
+  }, [provider]);
 
   useEffect(() => {
     setAuctionRefreshFunction(() => fetchAuctions);
-  }, [setAuctionRefreshFunction, fetchAuctions]); // Added fetchAuctions as dependency
+  }, [setAuctionRefreshFunction, fetchAuctions]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -134,12 +134,12 @@ const AuctionPlace: React.FC<AuctionPlaceProps> = ({
 
   const validateBid = (tokenId: number, bidAmount: string, currentHighestBid: string) => {
     if (!bidAmount || isNaN(Number(bidAmount)) || Number(bidAmount) <= 0) {
-      return "Please enter a valid bid amount (greater than zero)."; // Translated
+      return "Please enter a valid bid amount (greater than zero).";
     }
     const bidInEth = Number(bidAmount);
     const currentBidInEth = Number(currentHighestBid);
     if (bidInEth <= currentBidInEth) {
-      return "Your bid must be higher than the current bid."; // Translated
+      return "Your bid must be higher than the current bid.";
     }
     return null;
   };
@@ -158,49 +158,46 @@ const AuctionPlace: React.FC<AuctionPlaceProps> = ({
 
   const handleBid = async (tokenId: number, bidAmount: string) => {
     if (!signer || !walletConnected) {
-      alert("You must connect your wallet to place a bid."); // Kept alert as per instruction
+      alert("You must connect your wallet to place a bid.");
       return;
     }
     if (!correctChain) {
-      alert("Please connect to the Sepolia network (Chain ID: 11155111) to place a bid."); // Kept alert
+      alert("Please connect to the Sepolia network (Chain ID: 11155111) to place a bid.");
       return;
     }
 
-    const contract = new ethers.Contract(
-      CONTRACT_ADDRESS,
-      CONTRACT_ABI,
-      signer
-    );
-
+    setPlacingBidTokenId(tokenId);
     try {
-      setLoading(true); 
+      const contract = new ethers.Contract(
+        CONTRACT_ADDRESS,
+        CONTRACT_ABI,
+        signer
+      );
 
       const auction = await contract.auctions(tokenId);
       const currentHighestBidWei: bigint = auction.highestBid as bigint;
-      const bidInWei = ethers.parseEther(bidAmount); 
+      const bidInWei = ethers.parseEther(bidAmount);
 
       if (bidInWei <= currentHighestBidWei) {
-        alert("Your bid must be higher than the current highest bid."); // Kept alert
+        alert("Your bid must be higher than the current highest bid.");
         return;
       }
-      // Assuming seller is stored in auction struct and contract has `ownerOf` for the token
-      const tokenOwner = await contract.ownerOf(tokenId); // Get current owner from contract (should be the auction seller after transfer)
+      const tokenOwner = await contract.ownerOf(tokenId);
       if (tokenOwner.toLowerCase() === walletAddress.toLowerCase()) {
-          alert("You cannot bid on your own auction."); // Kept alert
-          return;
+        alert("You cannot bid on your own auction.");
+        return;
       }
-
 
       console.log(`Sending bid for tokenId ${tokenId} with value ${bidAmount} ETH`);
       const tx = await contract.bid(tokenId, { value: bidInWei });
       console.log(`Transaction hash: ${tx.hash}`);
-      await tx.wait(); 
+      await tx.wait();
       console.log("Transaction confirmed.");
 
-      alert("Bid placed successfully!"); // Kept alert
-      fetchAuctions(); // Refresh auctions list
-      onNFTAction(); // Trigger global refresh for consistency
-      setBidAmounts((prev) => { 
+      alert("Bid placed successfully!");
+      fetchAuctions();
+      onNFTAction();
+      setBidAmounts((prev) => {
         const newAmounts = { ...prev };
         delete newAmounts[tokenId];
         return newAmounts;
@@ -211,42 +208,39 @@ const AuctionPlace: React.FC<AuctionPlaceProps> = ({
       }));
     } catch (e: any) {
       console.error("Error placing bid:", e);
-      alert("Error placing bid. Please try again later."); // Kept alert
+      alert("Error placing bid. Please try again later.");
     } finally {
-      setLoading(false); 
+      setPlacingBidTokenId(null);
     }
   };
 
-  // Render conditional messages outside the main return for clarity
-  if (!walletConnected) // Using walletConnected from useWalletContext
+  if (!walletConnected)
     return (
-      <div className="p-6 text-center text-white pt-8"> {/* Added pt-8 for top spacing */}
-        Connect your wallet to view auctions. {/* Translated */}
+      <div className="p-6 text-center text-white pt-8">
+        Connect your wallet to view auctions.
       </div>
     );
-  if (!correctChain) // Using correctChain from useWalletContext
+  if (!correctChain)
     return (
-      <div className="p-6 text-center text-red-500 pt-8"> {/* Added pt-8 for top spacing */}
-        Please connect to the Sepolia network (Chain ID: 11155111). {/* Translated */}
+      <div className="p-6 text-center text-red-500 pt-8">
+        Please connect to the Sepolia network (Chain ID: 11155111).
       </div>
     );
 
   return (
-    // Add a container div for relative positioning or header
-    <div className="relative max-w-full mx-auto px-4 py-12 pt-8"> {/* Added pt-8 for consistent top spacing */}
-      {/* Block for the purchase history link */}
+    <div className="relative max-w-full mx-auto px-4 py-12 pt-8">
       <div className="absolute top-4 left-4 z-10">
         <Link to="/auction-history" className="text-blue-600 hover:text-blue-800 flex items-center space-x-2">
           <img src={historyIcon} alt="History" className="w-5 h-5 filter invert" />
-          <span className="text-md font-semibold text-white">Closed Auctions</span> {/* Translated */}
+          <span className="text-md font-semibold text-white">Closed Auctions</span>
         </Link>
       </div>
 
       <h2 className="text-3xl font-bold text-center mb-8 text-white mt-12">
-        Active Auctions {/* Translated */}
+        Active Auctions
       </h2>
       
-      {loading ? ( // Display loading spinner when loading
+      {loading ? (
         <div className="flex flex-col items-center justify-center py-8">
           <div
             className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"
@@ -254,26 +248,32 @@ const AuctionPlace: React.FC<AuctionPlaceProps> = ({
           >
             <span className="sr-only">Loading...</span>
           </div>
-          <p className="text-center text-gray-400 mt-4">Loading auctions...</p> {/* Translated */}
+          <p className="text-center text-gray-400 mt-4">Loading auctions...</p>
         </div>
-      ) : error ? ( // Display error message if there's an error
+      ) : error ? (
         <p className="text-center text-red-500 text-lg">{error}</p>
-      ) : auctions.length === 0 ? ( // Display message if no active auctions
-        <p className="text-center text-white text-lg">No active auctions.</p> 
-      ) : ( // Display auction grid
+      ) : auctions.length === 0 ? (
+        <p className="text-center text-white text-lg">No active auctions.</p>
+      ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
           {auctions.map((item) => {
             const now = Math.floor(Date.now() / 1000);
             const countdownSeconds = Math.max(item.endTime - now, 0);
-            const countdown = `${String(
-              Math.floor(countdownSeconds / 3600)
-            ).padStart(2, "0")}:${String(
-              Math.floor((countdownSeconds % 3600) / 60)
-            ).padStart(2, "0")}:${String(countdownSeconds % 60).padStart(
-              2,
-              "0"
-            )}`;
-            const isMyBid = item.highestBidder.toLowerCase() === walletAddress && Number(item.highestBid) > 0; // Using walletAddress from useWalletContext
+
+            // Calcolo del tempo rimanente in giorni, ore, minuti, secondi
+            const days = Math.floor(countdownSeconds / (24 * 3600));
+            const hours = Math.floor((countdownSeconds % (24 * 3600)) / 3600);
+            const minutes = Math.floor((countdownSeconds % 3600) / 60);
+            const seconds = countdownSeconds % 60;
+
+            // Formato leggibile
+            const timeRemaining = countdownSeconds > 0
+              ? days > 0
+                ? `${days}d ${hours}h ${minutes}m`
+                : `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
+              : "Ended";
+
+            const isMyBid = item.highestBidder.toLowerCase() === walletAddress && Number(item.highestBid) > 0;
             const bidError = bidErrors[item.tokenId];
 
             return (
@@ -290,7 +290,7 @@ const AuctionPlace: React.FC<AuctionPlaceProps> = ({
                     </h3>
                     {isMyBid && (
                       <span className="absolute top-0 right-0 bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded-bl">
-                        Your Bid {/* Translated */}
+                        Your Bid
                       </span>
                     )}
                   </div>
@@ -303,7 +303,7 @@ const AuctionPlace: React.FC<AuctionPlaceProps> = ({
                       />
                     ) : (
                       <span className="text-gray-500 text-sm p-2">
-                        Image not available {/* Translated */}
+                        Image not available
                       </span>
                     )}
                   </div>
@@ -312,7 +312,7 @@ const AuctionPlace: React.FC<AuctionPlaceProps> = ({
                     Current bid: {item.highestBid} ETH
                   </p>
                   <p className="text-gray-600 mt-1 text-xs">
-                    Time remaining: {countdownSeconds > 0 ? countdown : "Ended"} {/* Translated to "Ended" */}
+                    Time remaining: {timeRemaining}
                   </p>
                   <div className="mt-4">
                     <input
@@ -335,15 +335,25 @@ const AuctionPlace: React.FC<AuctionPlaceProps> = ({
                 </div>
                 <div className="p-4 border-t">
                   <button
-                    onClick={() => handleBid(item.tokenId, bidAmounts[item.tokenId])}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleBid(item.tokenId, bidAmounts[item.tokenId] || "");
+                    }}
                     className={`w-full py-2 rounded transition ${
-                      loading || countdownSeconds <= 0 || bidError
-                        ? "bg-gray-400 cursor-not-allowed"
+                      placingBidTokenId === item.tokenId || countdownSeconds <= 0 || bidError
+                        ? "bg-green-600 cursor-not-allowed"
                         : "bg-green-600 text-white hover:bg-green-500"
                     }`}
-                    disabled={loading || countdownSeconds <= 0 || !!bidError}
+                    disabled={placingBidTokenId !== null || countdownSeconds <= 0 || !!bidError}
                   >
-                    {loading ? "Placing bid..." : "Place Bid"} {/* Translated */}
+                    {placingBidTokenId === item.tokenId ? (
+                      <span className="flex items-center justify-center">
+                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                        Placing bid...
+                      </span>
+                    ) : (
+                      "Place Bid"
+                    )}
                   </button>
                 </div>
               </div>
